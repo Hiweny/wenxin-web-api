@@ -183,6 +183,13 @@ public class MainActivity extends Activity {
             Prefs.setWantRunning(this, true);
         }
 
+        apiKey.clearFocus();
+        port.clearFocus();
+        final ScrollView rootScroll = findViewById(R.id.rootScroll);
+        rootScroll.post(new Runnable() {
+            @Override public void run() { rootScroll.scrollTo(0, 0); }
+        });
+
         Log.subscribe(logTick);
         Log.add("[ui] 界面已就绪");
         ui.post(logTick);

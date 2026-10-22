@@ -16,6 +16,7 @@ public final class Log {
 
     public static void add(String line) {
         String stamped = FMT.format(new Date()) + "  " + line;
+        try { android.util.Log.i("WenxinApi", stamped); } catch (Throwable ignore) { }
         List<Runnable> copy;
         synchronized (LINES) {
             LINES.addLast(stamped);

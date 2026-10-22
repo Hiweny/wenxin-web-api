@@ -57,7 +57,8 @@ jobs:
             curl -s --max-time 25 http://127.0.0.1:18888/v1/models || true
             echo
             echo "=== chat non-stream ==="
-            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复：APK-OK\"}]}" || true
+            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复：APK-OK\"}]}" > nonstream.json || true
+            cat nonstream.json
             echo
             echo "=== chat stream ==="
             curl -s --max-time 150 -N -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"数到三\"}]}" > stream.txt || true
@@ -77,3 +78,4 @@ jobs:
             logcat.txt
             stream.txt
             full_logcat.txt
+            nonstream.json
