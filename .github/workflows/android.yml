@@ -6,6 +6,9 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   protocol-probe:
     name: 协议冒烟测试（真实接口）
@@ -84,7 +87,7 @@ jobs:
       - name: 收集产物
         run: |
           mkdir -p out
-          find app/build/outputs/apk -name '*.apk' -exec cp {} out/ \;
+          find app/build/outputs/apk -name '*.apk' -exec cp {} out/WenxinWebApi.apk \;
           ls -la out
       - uses: actions/upload-artifact@v4
         with:
