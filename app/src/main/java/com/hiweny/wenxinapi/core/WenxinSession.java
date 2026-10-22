@@ -91,6 +91,7 @@ public class WenxinSession {
         public int completionTokens = 0;
         public int httpStatus = 0;
         public long firstTokenMs = -1;
+        public StringBuilder rawHead = new StringBuilder();
         public long totalMs = 0;
 
         public String textStr() { return text.toString(); }
@@ -327,6 +328,9 @@ public class WenxinSession {
         StringBuilder data = new StringBuilder();
         try {
             while ((line = br.readLine()) != null) {
+                if (r.rawHead.length() < 1200) {
+                    r.rawHead.append(line).append('\n');
+                }
                 if (line.isEmpty()) {
                     if (ev != null) {
                         handleEvent(ev, data.toString(), r, listener, seen, t0);

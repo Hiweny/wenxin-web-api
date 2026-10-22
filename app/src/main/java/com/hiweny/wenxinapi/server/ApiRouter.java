@@ -57,11 +57,37 @@ public class ApiRouter implements HttpServer.Handler {
         if ("/v1/models".equals(p) || "/models".equals(p)) { res.json(200, modelsJson()); return; }
         if ("/v1/chat/completions".equals(p) || "/chat/completions".equals(p)) { chat(req, res); return; }
         if ("/v1/history".equals(p) || "/history".equals(p)) { history(req, res); return; }
+        if ("/debug/probe".equals(p)) { debugProbe(res); return; }
         if ("/v1/pool".equals(p)) {
             res.json(200, Json.write(listToJson(pool.snapshot())));
             return;
         }
         res.json(404, "{\"error\":{\"message\":\"not found\",\"type\":\"invalid_request_error\"}}");
+    }
+
+    /** 诊断：一次完整的上游调用，返回详细信息，便于定位客户端侧差异 */
+    private void debugProbe(HttpServer.Response res) throws Exception {
+        Map<String, Object> out = new LinkedHashMap<>();
+        WenxinSession s = new WenxinSession();
+        long t0 = System.currentTimeMillis();
+        try {
+            s.warm();
+            out.put("warm_ms", System.currentTimeMillis() - t0);
+            out.put("token", s.token);
+            out.put("lid", s.lid);
+            out.put("cookies", s.cookieNames());
+            out.put("cookie_len", s.cookieHeader().length());
+            WenxinSession.Result r = s.chat("只回复：PROBE", "DeepSeek-V4-Flash", false, null);
+            out.put("http_status", r.httpStatus);
+            out.put("error", r.error);
+            out.put("model", r.model);
+            out.put("text", r.textStr());
+            out.put("tokens", r.promptTokens + "/" + r.completionTokens);
+            out.put("raw_head", Tools.truncate(r.rawHead.toString(), 1100));
+        } catch (Exception e) {
+            out.put("exception", String.valueOf(e));
+        }
+        res.json(200, Json.write(out));
     }
 
     private List<Object> listToJson(List<String> l) {
