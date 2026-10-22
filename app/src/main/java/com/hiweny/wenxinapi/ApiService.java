@@ -77,7 +77,9 @@ public class ApiService extends Service {
         INSTANCE = this;
         createChannel();
         cfg = Prefs.load(this);
-        store = new HistoryStore(new File(getFilesDir(), "data"), 500);
+        File dataDir = new File(getFilesDir(), "data");
+        if (!dataDir.exists()) dataDir.mkdirs();
+        store = new HistoryStore(dataDir, 500);
         pool = new SessionPool(cfg.poolSize, new SessionPool.Logger() {
             @Override public void log(String line) { Log.add(line); }
         });

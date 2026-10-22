@@ -6,7 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'app/src/main/res/**'
-      - 'app/src/main/java/com/hiweny/wenxinapi/MainActivity.java'
+      - 'app/src/main/java/**'
       - '.github/workflows/ui-shot.yml'
 
 jobs:
@@ -38,34 +38,38 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            set -x
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.hiweny.wenxinapi/.MainActivity
-            sleep 8
+            sleep 6
             adb exec-out screencap -p > shot_idle.png
+            adb shell am force-stop com.hiweny.wenxinapi
+            sleep 1
             adb shell am start -n com.hiweny.wenxinapi/.MainActivity --ez auto_start true
-            sleep 14
+            sleep 18
             adb exec-out screencap -p > shot_running.png
+            adb shell dumpsys activity services com.hiweny.wenxinapi > services.txt || true
+            adb logcat -d -s WenxinApi:* AndroidRuntime:E ActivityManager:E > logcat.txt || true
             adb forward tcp:18888 tcp:8787
             echo "=== healthz ==="
-            curl -s --max-time 20 http://127.0.0.1:18888/healthz || true
+            curl -s --max-time 25 http://127.0.0.1:18888/healthz || true
             echo
             echo "=== models ==="
-            curl -s --max-time 20 http://127.0.0.1:18888/v1/models || true
+            curl -s --max-time 25 http://127.0.0.1:18888/v1/models || true
             echo
-            echo "=== chat (non-stream) ==="
-            curl -s --max-time 150 -X POST http://127.0.0.1:18888/v1/chat/completions \
-              -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
-              -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"只回复：APK-OK"}]}' || true
+            echo "=== chat non-stream ==="
+            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复：APK-OK\"}]}" || true
             echo
-            echo "=== chat (stream) ==="
-            curl -s --max-time 150 -N -X POST http://127.0.0.1:18888/v1/chat/completions \
-              -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
-              -d '{"model":"deepseek-v4-pro","stream":true,"messages":[{"role":"user","content":"数到三"}]}' | head -20 || true
+            echo "=== chat stream ==="
+            curl -s --max-time 150 -N -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"数到三\"}]}" > stream.txt || true
+            head -c 1200 stream.txt
             echo
             adb exec-out screencap -p > shot_after_chat.png
-            adb shell dumpsys activity services com.hiweny.wenxinapi | head -30
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ui-shots
-          path: shot_*.png
+          path: |
+            shot_*.png
+            services.txt
+            logcat.txt
+            stream.txt

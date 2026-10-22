@@ -107,6 +107,12 @@ public final class PromptBuilder {
             sys.append("如果不需要调用工具，就直接正常回答用户。一次可以调用多个工具（数组里多个对象）。\n");
         }
 
+        // 单轮纯文本对话：零包装直通，回答更自然
+        if (sys.length() == 0 && history.isEmpty() && !b.toolsEnabled) {
+            b.prompt = lastUser;
+            return b;
+        }
+
         StringBuilder p = new StringBuilder();
         if (sys.length() > 0) {
             p.append("【系统指令】\n").append(sys.toString().trim()).append("\n\n");

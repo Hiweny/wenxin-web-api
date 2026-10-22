@@ -311,6 +311,25 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && intent.getBooleanExtra("auto_start", false)) {
+            saveCfg();
+            Intent i = new Intent(this, ApiService.class);
+            i.setAction(ApiService.ACTION_START);
+            i.putExtra("port", cfg.port);
+            i.putExtra("api_key", cfg.apiKey);
+            i.putExtra("model", cfg.defaultModel);
+            i.putExtra("search", cfg.searchDefault);
+            i.putExtra("pool", cfg.poolSize);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+            else startService(i);
+            Prefs.setWantRunning(this, true);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         refreshState();
