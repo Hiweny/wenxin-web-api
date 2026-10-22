@@ -41,7 +41,7 @@ public class FloatingBubble {
         GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{0xFF5B8CFF, 0xFF7A6BFF});
         bg.setShape(GradientDrawable.OVAL);
-        bg.setStroke(dp(1.5f), 0x55FFFFFF);
+        bg.setStroke((int) dp(1.5f), 0x55FFFFFF);
         view.setBackground(bg);
         view.setElevation(dp(6));
 

@@ -210,7 +210,9 @@ public class ApiService extends Service {
                 .setSmallIcon(android.R.drawable.stat_sys_upload_done)
                 .setOngoing(true)
                 .setContentIntent(pi)
-                .addAction(new Notification.Action.Builder(null, "停止", stopPi).build());
+                .addAction(new Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                        "停止", stopPi).build());
         return b.build();
     }
 

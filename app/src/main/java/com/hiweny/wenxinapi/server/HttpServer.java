@@ -69,6 +69,9 @@ public class HttpServer {
         public synchronized void sendHeaders() throws IOException {
             if (headersSent) return;
             headersSent = true;
+            if (chunked && !headers.containsKey("Transfer-Encoding")) {
+                headers.put("Transfer-Encoding", "chunked");
+            }
             StringBuilder sb = new StringBuilder();
             sb.append("HTTP/1.1 ").append(status).append(' ').append(reason(status)).append("\r\n");
             for (Map.Entry<String, String> e : headers.entrySet()) {
