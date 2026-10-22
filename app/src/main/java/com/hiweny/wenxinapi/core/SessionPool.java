@@ -68,7 +68,7 @@ public class SessionPool {
                     if (!s.isReady()) {
                         try {
                             s.warm();
-                            logger.log("[pool] slot#" + i + " warmed token=" + s.token + " lid=" + s.lid);
+                            logger.log("[pool] slot#" + i + " warmed token=" + s.token + " lid=" + s.lid + " cookies=" + s.cookieHeader().length() + "b [" + s.cookieNames() + "]");
                         } catch (Exception e) {
                             locks[i].unlock();
                             logger.log("[pool] slot#" + i + " warm failed: " + e.getMessage());

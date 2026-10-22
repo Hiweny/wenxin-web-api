@@ -135,16 +135,29 @@ public class WenxinSession {
             if (!"set-cookie".equalsIgnoreCase(e.getKey())) continue;
             for (String raw : e.getValue()) {
                 if (raw == null) continue;
-                int eq = raw.indexOf('=');
-                if (eq <= 0) continue;
-                String name = raw.substring(0, eq).trim();
-                String val = raw.substring(eq + 1);
-                int semi = val.indexOf(';');
-                if (semi >= 0) val = val.substring(0, semi);
-                cookies.put(name, val);
-                if ("BAIDUID".equals(name)) baiduid = val;
+                // Android 的 HttpURLConnection 可能把多个 Set-Cookie 合并成一行，这里按 ", name=" 拆开
+                String[] parts = raw.split(",(?=\\s*[A-Za-z0-9_\\-]+=)");
+                for (String part : parts) {
+                    if (part == null) continue;
+                    String one = part.trim();
+                    int eq = one.indexOf('=');
+                    if (eq <= 0) continue;
+                    String name = one.substring(0, eq).trim();
+                    String val = one.substring(eq + 1);
+                    int semi = val.indexOf(';');
+                    if (semi >= 0) val = val.substring(0, semi);
+                    if (name.isEmpty() || val.isEmpty()) continue;
+                    cookies.put(name, val);
+                    if ("BAIDUID".equals(name)) baiduid = val;
+                }
             }
         }
+    }
+
+    public String cookieNames() {
+        StringBuilder sb = new StringBuilder();
+        for (String k : cookies.keySet()) { if (sb.length() > 0) sb.append(','); sb.append(k); }
+        return sb.toString();
     }
 
     public String cookieHeader() {
