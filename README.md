@@ -4,6 +4,13 @@
 
 > 纯 HTTP 直连，不依赖浏览器 / WebView 自动化；一个 APK 就是一台小 API 服务器。
 
+**下载**：[WenxinWebApi.apk](https://github.com/Hiweny/wenxin-web-api/releases/latest/download/WenxinWebApi.apk)（约 120 KB）
+
+<p align="center">
+  <img src="docs/screenshot-running.png" width="300" />
+  <img src="docs/screenshot-idle.png" width="300" />
+</p>
+
 ---
 
 ## 特性
