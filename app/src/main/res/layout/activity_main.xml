@@ -200,9 +200,10 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:buttonTint="@color/accent"
+                    android:paddingLeft="0dp"
                     android:text="深度思考"
                     android:textColor="@color/text"
-                    android:textSize="13sp" />
+                    android:textSize="12.5sp" />
 
                 <CheckBox
                     android:id="@+id/switchSearch"
@@ -210,16 +211,10 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:buttonTint="@color/accent"
+                    android:paddingLeft="0dp"
                     android:text="联网搜索"
                     android:textColor="@color/text"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                    android:textSize="12.5sp" />
 
                 <CheckBox
                     android:id="@+id/switchFloat"
@@ -227,18 +222,12 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:buttonTint="@color/accent"
+                    android:paddingLeft="0dp"
                     android:text="悬浮星星"
                     android:textColor="@color/text"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="思考默认开 · 搜索默认关"
-                    android:textColor="#5C6577"
-                    android:textSize="11sp" />
+                    android:textSize="12.5sp" />
             </LinearLayout>
+
         </LinearLayout>
 
         <!-- 主按钮 -->

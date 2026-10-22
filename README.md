@@ -19,10 +19,14 @@
 | --- | --- |
 | 免登录 | 每次调用只需一次 `GET https://wenxin.baidu.com/` 预热，拿到匿名身份（cookie + token + lid），无需任何账号 |
 | 模型 | `deepseek-v4-pro`、`deepseek-v4-flash`、`deepseek-r1`、`ernie-5.1`、`smartmode` |
+| 深度思考 | **默认开启**，思考链以 `reasoning_content` 流式输出；`thinking:false` / `reasoning_effort:"none"` 可关 |
+| 联网搜索 | **默认关闭**，`search:true` 开启（走文心对话接口自带的联网能力） |
+| 识图 | 支持 `image_url`（http(s) 或 `data:` base64），实测可直接被上游识别，最多 4 张 |
 | OpenAI 兼容 | `POST /v1/chat/completions`（流式 / 非流式）、`GET /v1/models`、`GET /v1/history`、`GET /healthz` |
 | 工具调用 | 无原生 function calling → 用 `@@tool_calls@@` 标记协议 + 宽容解析，对客户端表现为标准 `tool_calls` |
 | 防撤回 | 流式即时下发 + 本地完整存档（`/v1/history`、App 内「防撤回记录」），上游中途截断/撤回不影响已输出内容 |
-| 会话池 | 多个独立匿名身份轮换，单身份串行、跨身份并行，失败自动重建，规避同身份高频风控 |
+| 可诊断 | `/debug/probe`（一次完整上游调用）、`/debug/last`（最近一次请求的原始 messages 与折叠后的 prompt） |
+| 严格无状态 | **每个请求用一个全新匿名身份，用完即弃**（预取池只负责提速），彻底避免上游把同一 lid 当会话续写导致"永远回同一句" |
 | APK 保活 | 前台服务 + WakeLock + 通知栏常驻 + 可选悬浮球 + 电池优化白名单引导 |
 | 深色 UI | 单页极简控制台：状态、地址、Key、端口、模型、日志、记录 |
 
@@ -115,6 +119,18 @@ print(resp.choices[0].message.tool_calls)
 
 ---
 
+## 请求参数（OpenAI 兼容之外的扩展）
+
+| 参数 | 位置 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `thinking` | body / `extra_body` | `true` | 深度思考开关 |
+| `reasoning_effort` | body / `extra_body` | — | `"none"` 关闭思考，其余视为开启 |
+| `search` | body / `extra_body` | `false` | 联网搜索开关 |
+| `messages[].content[]` | 标准 OpenAI 多模态 | — | `{"type":"image_url","image_url":{"url":"..."}}` 支持 `data:` URL |
+
+> 无状态设计：不保存任何会话，客户端每次必须发送完整 `messages`；服务端会把它折叠成
+> 「系统指令 + 对话历史 + 当前问题」一次性发给上游，因此**多轮上下文完全由客户端控制**。
+
 ## 端点
 
 | 方法 | 路径 | 说明 |
@@ -124,6 +140,8 @@ print(resp.choices[0].message.tool_calls)
 | GET | `/v1/history?limit=50&full=1` | 防撤回存档（`id` 参数可看单条全文） |
 | GET | `/v1/pool` | 会话池状态 |
 | GET | `/healthz` | 存活探针 |
+| GET | `/debug/probe` | 自检：真实跑一次上游调用并返回细节 |
+| GET | `/debug/last` | 最近一次请求的原始 messages / 折叠后 prompt（排查"答非所问"最快） |
 
 ---
 
@@ -150,6 +168,16 @@ chunked 解码 + 原始 `Set-Cookie` 逐条解析），JVM 与 Android 的行为
 
 ---
 
+## 端到端验收
+
+```bash
+python3 tools/e2e_api.py http://127.0.0.1:8787 sk-wenxin
+```
+
+会依次验证：健康检查 → **三次独立提问答案互不相同**（防"永远回同一句"）→ 上下文全量传递 →
+深度思考 → 关闭思考 → 识图（红/蓝）→ 工具调用 → 工具结果回传 → 联网开关 → 防撤回存档。
+CI 的 `ui-shot` job 会把 APK 装进 Android 13 模拟器后跑同一份脚本。
+
 ## 目录
 
 ```
@@ -164,7 +192,7 @@ app/src/main/java/com/hiweny/wenxinapi/
 │   ├── HttpServer.java    # 极简 HTTP/1.1（chunked，SSE）
 │   └── ApiRouter.java     # OpenAI 兼容路由
 ├── ApiService.java        # 前台服务（保活）
-├── FloatingBubble.java    # 悬浮球
+├── FloatingBubble.java    # 悬浮星星（拖动后自动贴边）
 └── MainActivity.java      # 深色控制台
 tools/                     # CI 冒烟测试入口（真实接口）
 ```

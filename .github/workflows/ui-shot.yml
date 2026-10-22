@@ -44,7 +44,8 @@ jobs:
             adb exec-out screencap -p > shot_idle.png
             adb shell am force-stop com.hiweny.wenxinapi
             sleep 1
-            adb shell am start -n com.hiweny.wenxinapi/.MainActivity --ez auto_start true
+            adb shell appops set com.hiweny.wenxinapi SYSTEM_ALERT_WINDOW allow || true
+            adb shell am start -n com.hiweny.wenxinapi/.MainActivity --ez auto_start true --ez bubble true
             sleep 18
             adb exec-out screencap -p > shot_running.png
             adb shell dumpsys activity services com.hiweny.wenxinapi > services.txt || true

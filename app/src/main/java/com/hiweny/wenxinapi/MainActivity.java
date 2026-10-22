@@ -173,6 +173,10 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
 
+        if (getIntent() != null && getIntent().getBooleanExtra("bubble", false)) {
+            Prefs.setAttr(this, "bubble", "1");
+            switchFloat.setChecked(true);
+        }
         if (getIntent() != null && getIntent().getBooleanExtra("auto_start", false)) {
             saveCfg();
             Intent i = new Intent(this, ApiService.class);
