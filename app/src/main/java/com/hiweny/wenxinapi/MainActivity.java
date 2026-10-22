@@ -54,8 +54,9 @@ public class MainActivity extends Activity {
     private final Runnable logTick = new Runnable() {
         @Override public void run() {
             logView.setText(Log.text());
+            // 只滚动日志框自身，绝不触发外层 ScrollView 联动（否则页面会被"顶"到日志区）
             logScroll.post(new Runnable() {
-                @Override public void run() { logScroll.fullScroll(View.FOCUS_DOWN); }
+                @Override public void run() { logScroll.scrollTo(0, logView.getBottom()); }
             });
             ui.postDelayed(this, 700);
         }
@@ -189,6 +190,9 @@ public class MainActivity extends Activity {
         rootScroll.post(new Runnable() {
             @Override public void run() { rootScroll.scrollTo(0, 0); }
         });
+        rootScroll.postDelayed(new Runnable() {
+            @Override public void run() { rootScroll.scrollTo(0, 0); apiKey.clearFocus(); port.clearFocus(); }
+        }, 600);
 
         Log.subscribe(logTick);
         Log.add("[ui] 界面已就绪");
