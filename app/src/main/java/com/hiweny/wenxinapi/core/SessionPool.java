@@ -26,6 +26,8 @@ public class SessionPool {
     private volatile boolean closed = false;
     private Thread refiller;
     private final AtomicInteger seq = new AtomicInteger();
+    /** 最近用过的身份指纹，用于识别"预热拿到同一个 lid"（缓存/网关串号）的情况 */
+    private final java.util.LinkedHashSet<String> recentLids = new java.util.LinkedHashSet<>();
 
     public SessionPool(int size, Logger logger) {
         this.size = Math.max(1, Math.min(6, size));
@@ -75,15 +77,45 @@ public class SessionPool {
             try {
                 WenxinSession s = new WenxinSession();
                 s.warm();
+                if (isRepeatedLid(s.lid)) {
+                    // 同一个 lid 被反复下发，说明某一层在缓存首页：重试一次拿真正的匿名身份
+                    logger.log("[pool] 检测到重复匿名身份 lid=" + s.lid + "，重新预热");
+                    WenxinSession s2 = new WenxinSession();
+                    s2.warm();
+                    if (isRepeatedLid(s2.lid)) {
+                        logger.log("[pool] 仍重复，继续重试");
+                        try { Thread.sleep(400); } catch (InterruptedException ie) { return; }
+                        continue;
+                    }
+                    s = s2;
+                }
                 synchronized (ready) {
                     if (ready.size() < size) {
                         ready.addLast(s);
-                        ready.notifyAll();
+                        notifyAll();
                     }
                 }
+                rememberLid(s.lid);
             } catch (Exception e) {
                 logger.log("[pool] warm failed: " + e.getMessage());
                 try { Thread.sleep(600); } catch (InterruptedException ie) { return; }
+            }
+        }
+    }
+
+    private boolean isRepeatedLid(String lid) {
+        if (lid == null || lid.isEmpty()) return false;
+        synchronized (recentLids) { return recentLids.contains(lid); }
+    }
+
+    private void rememberLid(String lid) {
+        if (lid == null || lid.isEmpty()) return;
+        synchronized (recentLids) {
+            recentLids.add(lid);
+            while (recentLids.size() > 60) {
+                java.util.Iterator<String> it = recentLids.iterator();
+                it.next();
+                it.remove();
             }
         }
     }

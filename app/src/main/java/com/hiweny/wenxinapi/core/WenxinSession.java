@@ -116,8 +116,12 @@ public class WenxinSession {
         h.put("sec-fetch-mode", "navigate");
         h.put("sec-fetch-site", "none");
         h.put("upgrade-insecure-requests", "1");
+        // 不允许任何中间层缓存首页：被缓存时会拿到别人的（或上一次的）token/lid，
+        // 上游就会把我们的多次请求当成同一个页面会话，表现为"永远回同一句话"。
+        h.put("Cache-Control", "no-cache, no-store, max-age=0");
+        h.put("Pragma", "no-cache");
 
-        String url = HOME_URL;
+        String url = HOME_URL + "?_r=" + Long.toHexString(System.nanoTime());
         Http1Client.Response resp = null;
         IOException lastErr = null;
         for (int attempt = 0; attempt < 3; attempt++) {
