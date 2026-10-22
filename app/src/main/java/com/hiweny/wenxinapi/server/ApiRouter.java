@@ -411,7 +411,7 @@ public class ApiRouter implements HttpServer.Handler {
                 try {
                     if (!started[0]) {
                         pend.append(text);
-                        if (pend.length() < 36) return;
+                        if (pend.length() < 24) return;
                         if (looksDuplicate(built.prompt, pend.toString())) throw new RetrySignal();
                         flushPending.run();
                         return;
@@ -428,10 +428,7 @@ public class ApiRouter implements HttpServer.Handler {
                 }
             }
             @Override public void onThink(String think) {
-                if (!started[0]) {
-                    if (pendThink.length() < 4000) pendThink.append(think);
-                    return;
-                }
+                // 思考链立即下发：用户能马上看到"在思考"，不必等正文首段缓冲判定
                 try {
                     sendChunk(res, id, model, created, "{\"reasoning_content\":" + quote(think) + "}", null, null);
                 } catch (Exception e) {

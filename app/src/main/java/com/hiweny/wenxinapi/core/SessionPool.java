@@ -92,7 +92,10 @@ public class SessionPool {
                 synchronized (ready) {
                     if (ready.size() < size) {
                         ready.addLast(s);
-                        notifyAll();
+                        // 必须显式写 ready.notifyAll()：未限定写法会作用在 SessionPool 实例上，
+                        // 而我们持有的锁是 ready → 抛 IllegalMonitorStateException，
+                        // 补货线程每次都会失败（池子永远是空的，请求只能现场预热 = 首字很慢）。
+                        ready.notifyAll();
                     }
                 }
                 rememberLid(s.lid);

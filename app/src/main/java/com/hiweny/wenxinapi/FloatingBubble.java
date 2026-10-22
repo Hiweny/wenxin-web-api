@@ -51,6 +51,8 @@ public class FloatingBubble {
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         int pad = (int) dp(5);
         icon.setPadding(pad, pad, pad, pad);
+        // 极淡的圆形底 + 细描边：深色/浅色壁纸下图案都清晰，不改变图案本身
+        icon.setBackgroundResource(R.drawable.bg_bubble);
         container.addView(icon, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 

@@ -97,16 +97,21 @@ public final class Http1Client {
                                    boolean keepAlive, Socket reuse) throws IOException {
         if (reuse != null) {
             try {
-                return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs, keepAlive, reuse, false);
+                // 复用连接必须给"等响应头"设一个短超时：池里的 socket 可能已被对端关掉，
+                // 直接沿用长超时会让这一次请求白等十几秒（实测 12s+）。
+                int headTimeout = Math.min(readTimeoutMs, 4000);
+                return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs,
+                        headTimeout, keepAlive, reuse, false);
             } catch (IOException e) {
                 try { reuse.close(); } catch (Exception ignore) { }
             }
         }
-        return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs, keepAlive, null, true);
+        return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs,
+                readTimeoutMs, keepAlive, null, true);
     }
 
     private static Response doRequest(String urlStr, String method, Map<String, String> extraHeaders,
-                                      byte[] payload, int connectTimeoutMs, int readTimeoutMs,
+                                      byte[] payload, int connectTimeoutMs, int readTimeoutMs, int headTimeoutMs,
                                       boolean keepAlive, Socket pooled, boolean fresh) throws IOException {
         URL url = new URL(urlStr);
         boolean https = "https".equalsIgnoreCase(url.getProtocol());
@@ -136,7 +141,7 @@ public final class Http1Client {
                 socket = ssl;
             }
         }
-        socket.setSoTimeout(readTimeoutMs);
+        socket.setSoTimeout(headTimeoutMs);
 
         StringBuilder sb = new StringBuilder();
         sb.append(method).append(' ').append(path).append(" HTTP/1.1\r\n");
@@ -174,6 +179,8 @@ public final class Http1Client {
             if ("set-cookie".equalsIgnoreCase(k)) res.setCookies.add(v);
             res.headers.put(k, v);
         }
+        // 响应头已到：恢复正常的流读取超时
+        try { socket.setSoTimeout(readTimeoutMs); } catch (Exception ignore) { }
         res.socket = socket;
         res.keepSocket = keepAlive;
 

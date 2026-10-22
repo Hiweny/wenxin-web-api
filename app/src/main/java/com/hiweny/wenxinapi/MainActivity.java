@@ -36,9 +36,9 @@ public class MainActivity extends Activity {
 
     private static final String[] MODELS = {"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-r1", "ernie-5.1", "smartmode"};
     private static final String[] MODEL_LABELS = {
-            "DeepSeek V4 Pro（推荐）",
-            "DeepSeek V4 Flash（更快）",
-            "DeepSeek R1（深度思考）",
+            "V4 Pro（推荐）",
+            "V4 Flash（更快）",
+            "R1（深思）",
             "文心 5.1",
             "智能模式"
     };

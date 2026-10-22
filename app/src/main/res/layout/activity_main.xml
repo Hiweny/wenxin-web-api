@@ -228,7 +228,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginLeft="6dp"
-                    android:layout_weight="1.35"
+                    android:layout_weight="1.65"
                     android:orientation="vertical">
 
                     <TextView
@@ -361,7 +361,7 @@
                     android:fontFamily="monospace"
                     android:lineSpacingExtra="3dp"
                     android:text=""
-                    android:textColor="#93A0B5"
+                    android:textColor="#AEBACB"
                     android:textIsSelectable="true"
                     android:textSize="10.5sp" />
             </ScrollView>
@@ -371,7 +371,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="向上滑动可暂停自动滚动，回到底部恢复跟随"
-                android:textColor="#525B6B"
+                android:textColor="#6E7889"
                 android:textSize="10.5sp" />
         </LinearLayout>
 
@@ -381,7 +381,7 @@
             android:layout_marginTop="16dp"
             android:gravity="center"
             android:text="仅供个人学习研究，请遵守平台服务条款"
-            android:textColor="#4E5666"
+            android:textColor="#6E7889"
             android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

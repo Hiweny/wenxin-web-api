@@ -401,7 +401,7 @@ public class WenxinSession {
         Http1Client.Response resp;
         java.net.Socket reuse = chatSocket;
         // 预连接放置超过 25 秒就丢弃（服务器空闲超时关掉后复用会白等一次超时）
-        if (reuse != null && System.currentTimeMillis() - chatSocketAt > 25000) {
+        if (reuse != null && System.currentTimeMillis() - chatSocketAt > 8000) {
             try { reuse.close(); } catch (Exception ignore) { }
             reuse = null;
         }
