@@ -64,12 +64,16 @@ jobs:
             curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复：APK-OK\"}]}" > nonstream.json || true
             cat nonstream.json
             echo
+            echo "=== tool call ==="
+            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"messages\":[{\"role\":\"user\",\"content\":\"帮我查一下杭州现在的天气\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"查询城市天气\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]}" > tools.json || true
+            cat tools.json
+            echo
             echo "=== chat stream ==="
             curl -s --max-time 150 -N -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"数到三\"}]}" > stream.txt || true
             head -c 1200 stream.txt
             echo
             adb exec-out screencap -p > shot_after_chat.png
-            adb logcat -d > full_logcat.txt || true
+            adb logcat -d | tail -2500 > full_logcat.txt || true
             if grep -q "FATAL EXCEPTION" full_logcat.txt; then echo "APP CRASHED"; grep -A20 "FATAL EXCEPTION" full_logcat.txt; exit 1; fi
             echo "no crash detected"
       - uses: actions/upload-artifact@v4
@@ -84,3 +88,4 @@ jobs:
             full_logcat.txt
             nonstream.json
             probe.json
+            tools.json

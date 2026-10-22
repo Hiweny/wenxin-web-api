@@ -120,6 +120,20 @@ print(resp.choices[0].message.tool_calls)
 
 ---
 
+## 一个必须知道的坑：HttpURLConnection 在 Android 上会改写请求
+
+同样的代码在 JVM 上跑得通、装到手机上却被上游判定为非法请求（只回 `😩抱歉，出了点小问题`）。
+原因是 Android 的 `HttpURLConnection` 实现会：
+
+* 合并 `Set-Cookie`（多个 cookie 变成一行，导致 cookie 解析残缺）；
+* 丢弃值为空的请求头（`landingpageswitch: ""`）；
+* 强制 `gzip` 并覆盖 `Accept-Encoding`。
+
+所以本项目的网络层是**手写的 HTTP/1.1 客户端**（`core/Http1Client.java`：`SSLSocket` + SNI +
+chunked 解码 + 原始 `Set-Cookie` 逐条解析），JVM 与 Android 的行为完全一致，也便于精确控制每一个字节。
+
+---
+
 ## 设计说明
 
 * **为什么不走浏览器**：网页端同样走这套 HTTP + SSE，浏览器只是外壳。直连省内存、省电、可并发，也不会因为页面改版而整块失效（改版时只需更新 `WenxinSession`）。
