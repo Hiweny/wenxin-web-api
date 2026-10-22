@@ -1,0 +1,71 @@
+name: ui-shot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/src/main/res/**'
+      - 'app/src/main/java/com/hiweny/wenxinapi/MainActivity.java'
+      - '.github/workflows/ui-shot.yml'
+
+jobs:
+  e2e-apk:
+    name: 真机(模拟器)E2E + UI 截图
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+      - name: 构建 debug APK
+        run: gradle assembleDebug --no-daemon
+      - name: 启用 KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 模拟器内跑通 APK API
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -x
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.hiweny.wenxinapi/.MainActivity
+            sleep 8
+            adb exec-out screencap -p > shot_idle.png
+            adb shell am start -n com.hiweny.wenxinapi/.MainActivity --ez auto_start true
+            sleep 14
+            adb exec-out screencap -p > shot_running.png
+            adb forward tcp:18888 tcp:8787
+            echo "=== healthz ==="
+            curl -s --max-time 20 http://127.0.0.1:18888/healthz || true
+            echo
+            echo "=== models ==="
+            curl -s --max-time 20 http://127.0.0.1:18888/v1/models || true
+            echo
+            echo "=== chat (non-stream) ==="
+            curl -s --max-time 150 -X POST http://127.0.0.1:18888/v1/chat/completions \
+              -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
+              -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"只回复：APK-OK"}]}' || true
+            echo
+            echo "=== chat (stream) ==="
+            curl -s --max-time 150 -N -X POST http://127.0.0.1:18888/v1/chat/completions \
+              -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
+              -d '{"model":"deepseek-v4-pro","stream":true,"messages":[{"role":"user","content":"数到三"}]}' | head -20 || true
+            echo
+            adb exec-out screencap -p > shot_after_chat.png
+            adb shell dumpsys activity services com.hiweny.wenxinapi | head -30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-shots
+          path: shot_*.png

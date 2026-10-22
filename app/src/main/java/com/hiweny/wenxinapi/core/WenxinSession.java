@@ -70,6 +70,7 @@ public class WenxinSession {
     private final LinkedHashMap<String, String> cookies = new LinkedHashMap<>();
     public volatile long lastUsed = 0;
     public volatile int failCount = 0;
+    public long minGapMs = 1200L;
     public volatile int totalCalls = 0;
 
     public interface Listener {
@@ -257,6 +258,12 @@ public class WenxinSession {
     }
 
     public Result chat(String query, String model, boolean search, Listener listener) throws IOException {
+        // 同一匿名身份保持最小请求间隔，降低触发风控的概率
+        long gap = System.currentTimeMillis() - lastUsed;
+        if (lastUsed > 0 && gap < minGapMs) {
+            try { Thread.sleep(minGapMs - gap); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+        lastUsed = System.currentTimeMillis();
         long t0 = System.currentTimeMillis();
         Result r = new Result();
         Map<String, Object> body = buildPayload(query, model, search);

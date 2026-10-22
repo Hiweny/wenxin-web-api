@@ -168,6 +168,20 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
 
+        if (getIntent() != null && getIntent().getBooleanExtra("auto_start", false)) {
+            saveCfg();
+            Intent i = new Intent(this, ApiService.class);
+            i.setAction(ApiService.ACTION_START);
+            i.putExtra("port", cfg.port);
+            i.putExtra("api_key", cfg.apiKey);
+            i.putExtra("model", cfg.defaultModel);
+            i.putExtra("search", cfg.searchDefault);
+            i.putExtra("pool", cfg.poolSize);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+            else startService(i);
+            Prefs.setWantRunning(this, true);
+        }
+
         Log.subscribe(logTick);
         Log.add("[ui] 界面已就绪");
         ui.post(logTick);
