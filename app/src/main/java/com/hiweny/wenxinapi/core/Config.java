@@ -7,6 +7,7 @@ public class Config {
     public int poolSize = 3;
     public String defaultModel = "deepseek-v4-pro";
     public boolean searchDefault = false;
+    public boolean thinkDefault = true;
     public boolean saveHistory = true;
     public boolean allowNoKey = false;
 }

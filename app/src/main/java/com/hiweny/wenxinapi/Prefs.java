@@ -17,6 +17,7 @@ public class Prefs {
         c.poolSize = sp.getInt("pool", 3);
         c.defaultModel = sp.getString("model", "deepseek-v4-pro");
         c.searchDefault = sp.getBoolean("search", false);
+        c.thinkDefault = sp.getBoolean("think", true);
         c.saveHistory = true;
         return c;
     }
@@ -28,6 +29,7 @@ public class Prefs {
         e.putInt("pool", c.poolSize);
         e.putString("model", c.defaultModel);
         e.putBoolean("search", c.searchDefault);
+        e.putBoolean("think", c.thinkDefault);
         e.apply();
     }
 

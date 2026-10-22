@@ -19,12 +19,28 @@ public final class PromptBuilder {
         public String prompt = "";
         public boolean toolsEnabled = false;
         public List<String> toolNames = new ArrayList<>();
+        public List<String> images = new ArrayList<>();   // 当前轮的图片（http/https 或 data:URL）
     }
 
     @SuppressWarnings("unchecked")
     private static String contentToText(Object content) {
+        return contentToText(content, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String contentToText(Object content, List<String> imageSink) {
         if (content == null) return "";
         if (content instanceof String) return (String) content;
+        if (content instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>) content;
+            for (String k : new String[]{"text", "content", "parts", "value"}) {
+                if (m.get(k) != null) {
+                    String t = contentToText(m.get(k), imageSink);
+                    if (!t.isEmpty()) return t;
+                }
+            }
+            return "";
+        }
         if (content instanceof List) {
             StringBuilder sb = new StringBuilder();
             for (Object part : (List<Object>) content) {
@@ -36,6 +52,15 @@ public final class PromptBuilder {
                     String t = Json.str(m, "text");
                     if (t != null) sb.append(t);
                 } else if ("image_url".equals(type)) {
+                    Object iu = m.get("image_url");
+                    String url = null;
+                    if (iu instanceof String) url = (String) iu;
+                    else if (iu instanceof Map) url = Json.str((Map<String, Object>) iu, "url");
+                    if (url != null && !url.isEmpty() && imageSink != null) imageSink.add(url);
+                    sb.append("[图片]");
+                } else if ("input_image".equals(type)) {
+                    String url = Json.str(m, "image_url");
+                    if (url != null && !url.isEmpty() && imageSink != null) imageSink.add(url);
                     sb.append("[图片]");
                 }
             }
@@ -77,8 +102,14 @@ public final class PromptBuilder {
                 } else if ("tool".equals(role) || "function".equals(role)) {
                     history.add("工具结果(" + nvl(Json.str(m, "name")) + ")：" + text);
                 } else {
-                    if (i == lastUserIdx) lastUser = text;
-                    else history.add("用户：" + text);
+                    if (i == lastUserIdx) {
+                        if (!text.trim().isEmpty()) lastUser = text;
+                        List<String> imgs = new ArrayList<>();
+                        contentToText(m.get("content"), imgs);
+                        b.images.addAll(imgs);
+                    } else if (!text.trim().isEmpty()) {
+                        history.add("用户：" + text);
+                    }
                 }
             }
         }

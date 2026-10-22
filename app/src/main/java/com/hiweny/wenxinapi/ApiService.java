@@ -107,6 +107,7 @@ public class ApiService extends Service {
         String key = i.getStringExtra("api_key");
         String model = i.getStringExtra("model");
         boolean search = i.getBooleanExtra("search", cfg.searchDefault);
+        cfg.thinkDefault = i.getBooleanExtra("think", cfg.thinkDefault);
         int poolN = i.getIntExtra("pool", cfg.poolSize);
         cfg.port = port;
         if (key != null) cfg.apiKey = key;
@@ -134,7 +135,7 @@ public class ApiService extends Service {
             RUNNING = true;
             BASE_URL = "http://" + firstIp() + ":" + cfg.port + "/v1";
             Log.add("[svc] 服务已启动 " + BASE_URL);
-            pool.prewarm();
+            pool.start();
             acquireWakeLock();
             updateNotification();
             syncBubble();

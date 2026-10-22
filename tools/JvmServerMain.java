@@ -26,7 +26,7 @@ public class JvmServerMain {
             @Override public void log(String line) { System.out.println(line); }
         });
         server.start();
-        pool.prewarm();
+        pool.start();
         System.out.println("[jvm] listening " + port);
         Thread.sleep(Long.MAX_VALUE);
     }

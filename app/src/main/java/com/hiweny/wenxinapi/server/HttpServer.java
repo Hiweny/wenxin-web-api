@@ -64,6 +64,7 @@ public class HttpServer {
             headers.put("Access-Control-Allow-Origin", "*");
             headers.put("Access-Control-Allow-Headers", "*");
             headers.put("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+            headers.put("Cache-Control", "no-store");
         }
 
         public synchronized void sendHeaders() throws IOException {
@@ -265,6 +266,22 @@ public class HttpServer {
                     readLine(in);
                 }
                 req.body = bos.toByteArray();
+            }
+
+            // 兼容客户端对请求体做 gzip 的情况（部分前端会这么做）
+            String enc = req.header("Content-Encoding");
+            if (enc != null && enc.toLowerCase(Locale.ROOT).contains("gzip") && req.body.length > 0) {
+                try {
+                    java.io.ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    java.util.zip.GZIPInputStream gz = new java.util.zip.GZIPInputStream(
+                            new java.io.ByteArrayInputStream(req.body));
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = gz.read(buf)) > 0) bos.write(buf, 0, n);
+                    req.body = bos.toByteArray();
+                } catch (Exception e) {
+                    logger.log("[http] gzip decode failed: " + e.getMessage());
+                }
             }
 
             Response res = new Response(out);

@@ -50,31 +50,16 @@ jobs:
             adb shell dumpsys activity services com.hiweny.wenxinapi > services.txt || true
             adb logcat -d -s WenxinApi:* AndroidRuntime:E ActivityManager:E > logcat.txt || true
             adb forward tcp:18888 tcp:8787
-            echo "=== healthz ==="
-            curl -s --max-time 25 http://127.0.0.1:18888/healthz || true
-            echo
-            echo "=== models ==="
-            curl -s --max-time 25 http://127.0.0.1:18888/v1/models || true
-            echo
             echo "=== debug probe ==="
             curl -s --max-time 120 "http://127.0.0.1:18888/debug/probe" > probe.json || true
             cat probe.json
             echo
-            echo "=== chat non-stream ==="
-            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复：APK-OK\"}]}" > nonstream.json || true
-            cat nonstream.json
-            echo
-            echo "=== tool call ==="
-            curl -s --max-time 150 -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"messages\":[{\"role\":\"user\",\"content\":\"帮我查一下杭州现在的天气\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"查询城市天气\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]}" > tools.json || true
-            cat tools.json
-            echo
-            echo "=== chat stream ==="
-            curl -s --max-time 150 -N -X POST "http://127.0.0.1:18888/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-wenxin" -d "{\"model\":\"deepseek-v4-pro\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"数到三\"}]}" > stream.txt || true
-            head -c 1200 stream.txt
-            echo
-            adb exec-out screencap -p > shot_after_chat.png
             adb logcat -d | tail -2500 > full_logcat.txt || true
-            if grep -q "FATAL EXCEPTION" full_logcat.txt; then echo "APP CRASHED"; grep -A20 "FATAL EXCEPTION" full_logcat.txt; exit 1; fi
+            echo "=== e2e (对话/多轮/思考/识图/工具/存档) ==="
+            python3 tools/e2e_api.py http://127.0.0.1:18888 sk-wenxin
+            adb exec-out screencap -p > shot_after_chat.png
+            adb logcat -d | tail -3000 > full_logcat2.txt || true
+            if grep -q "FATAL EXCEPTION" full_logcat2.txt; then echo "APP CRASHED"; grep -A20 "FATAL EXCEPTION" full_logcat2.txt; exit 1; fi
             echo "no crash detected"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -84,8 +69,6 @@ jobs:
             shot_*.png
             services.txt
             logcat.txt
-            stream.txt
             full_logcat.txt
-            nonstream.json
+            full_logcat2.txt
             probe.json
-            tools.json

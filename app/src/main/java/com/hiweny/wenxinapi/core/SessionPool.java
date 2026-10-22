@@ -1,14 +1,18 @@
 package com.hiweny.wenxinapi.core;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 匿名会话池：多个独立匿名身份（各自 cookie + token + lid）轮流使用，
- * 单会话内串行（避免同身份并发触发风控），跨会话并行。
+ * 匿名身份池（严格无状态版）。
+ *
+ * 关键设计：**每个请求用一个全新身份，用完即弃**。
+ * 文心网页端把 lid 当成"页面会话"，复用同一身份连续提问时，服务端可能把后续请求
+ * 当成同一会话的续写（表现为重复上一轮回答 / 上下文串味）。既然我们的 API 是无状态的
+ * （每次都把完整对话折叠进 prompt），那就让上游身份也一次性使用，彻底消除串扰。
+ *
+ * 池子只负责"提前预热"，让 acquire 不必现场等 300~600ms。
  */
 public class SessionPool {
 
@@ -17,114 +21,100 @@ public class SessionPool {
     }
 
     private final int size;
-    private final WenxinSession[] sessions;
-    private final ReentrantLock[] locks;
-    private final AtomicInteger cursor = new AtomicInteger(0);
+    private final LinkedList<WenxinSession> ready = new LinkedList<>();
     private final Logger logger;
+    private volatile boolean closed = false;
+    private Thread refiller;
+    private final AtomicInteger seq = new AtomicInteger();
 
     public SessionPool(int size, Logger logger) {
-        this.size = Math.max(1, Math.min(8, size));
+        this.size = Math.max(1, Math.min(6, size));
         this.logger = logger;
-        this.sessions = new WenxinSession[this.size];
-        this.locks = new ReentrantLock[this.size];
-        for (int i = 0; i < this.size; i++) {
-            this.sessions[i] = new WenxinSession();
-            this.locks[i] = new ReentrantLock();
-        }
     }
 
     public int size() { return size; }
 
     public class Lease implements AutoCloseable {
         public final WenxinSession session;
-        private final int idx;
         private boolean released = false;
 
-        Lease(WenxinSession s, int idx) { this.session = s; this.idx = idx; }
-
-        public void invalidate() {
-            synchronized (SessionPool.this) {
-                sessions[idx] = new WenxinSession();
-            }
-        }
+        Lease(WenxinSession s) { this.session = s; }
 
         @Override
         public void close() {
             if (released) return;
             released = true;
-            locks[idx].unlock();
+            // 一次性身份：直接丢弃，并由补货线程预热新的
+            synchronized (ready) { ready.notifyAll(); }
         }
     }
 
-    /** 取一个可用会话；优先空闲，其次按轮询顺序等待。 */
-    public Lease acquire(long waitMs) throws IOException {
-        long deadline = System.currentTimeMillis() + waitMs;
-        while (true) {
-            int n = cursor.getAndIncrement() % size;
-            for (int k = 0; k < size; k++) {
-                int i = (n + k) % size;
-                if (locks[i].tryLock()) {
-                    WenxinSession s = sessions[i];
-                    if (!s.isReady()) {
-                        try {
-                            s.warm();
-                            logger.log("[pool] slot#" + i + " warmed token=" + s.token + " lid=" + s.lid + " cookies=" + s.cookieHeader().length() + "b [" + s.cookieNames() + "]");
-                        } catch (Exception e) {
-                            locks[i].unlock();
-                            logger.log("[pool] slot#" + i + " warm failed: " + e.getMessage());
+    public void start() {
+        if (refiller != null) return;
+        refiller = new Thread(new Runnable() {
+            @Override public void run() {
+                while (!closed) {
+                    WenxinSession s = null;
+                    synchronized (ready) {
+                        if (ready.size() >= size) {
+                            try { ready.wait(500); } catch (InterruptedException e) { return; }
                             continue;
                         }
                     }
-                    return new Lease(s, i);
+                    try {
+                        s = new WenxinSession();
+                        s.warm();
+                        synchronized (ready) {
+                            if (ready.size() < size) {
+                                ready.addLast(s);
+                                ready.notifyAll();
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.log("[pool] warm failed: " + e.getMessage());
+                        try { Thread.sleep(800); } catch (InterruptedException ie) { return; }
+                    }
+                }
+            }
+        }, "session-refill");
+        refiller.setDaemon(true);
+        refiller.start();
+        logger.log("[pool] 一次性身份池已启动，容量 " + size);
+    }
+
+    public void stop() {
+        closed = true;
+        if (refiller != null) refiller.interrupt();
+    }
+
+    /** 取一个全新身份；池空时现场预热一个（保证可用性优先于速度） */
+    public Lease acquire(long waitMs) throws IOException {
+        start();
+        long deadline = System.currentTimeMillis() + waitMs;
+        while (true) {
+            synchronized (ready) {
+                if (!ready.isEmpty()) {
+                    return new Lease(ready.removeFirst());
                 }
             }
             if (System.currentTimeMillis() > deadline) {
-                // 超时降级：再尝试一次强制等待第一个槽位
-                boolean got = false;
-                try {
-                    got = locks[0].tryLock(2000, java.util.concurrent.TimeUnit.MILLISECONDS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-                if (got) {
-                    WenxinSession s = sessions[0];
-                    if (!s.isReady()) {
-                        try { s.warm(); } catch (Exception e) { locks[0].unlock(); throw new IOException("warm failed: " + e.getMessage()); }
-                    }
-                    return new Lease(s, 0);
-                }
-                throw new IOException("服务器忙（会话池已满），请稍后重试");
+                // 兜底：现场预热
+                WenxinSession s = new WenxinSession();
+                s.warm();
+                logger.log("[pool] 现场预热（池空）token=" + s.token);
+                return new Lease(s);
             }
-            try { Thread.sleep(60); } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("interrupted"); }
+            synchronized (ready) {
+                try { ready.wait(120); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
         }
     }
 
-    public List<String> snapshot() {
-        List<String> out = new ArrayList<>();
-        for (int i = 0; i < size; i++) {
-            WenxinSession s = sessions[i];
-            out.add("slot#" + i + (s.isReady() ? (" token=" + s.token + " calls=" + s.totalCalls + " fails=" + s.failCount) : " (cold)"));
-        }
+    public synchronized java.util.List<String> snapshot() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        int n;
+        synchronized (ready) { n = ready.size(); }
+        out.add("一次性身份池：就绪 " + n + " / 容量 " + size);
         return out;
-    }
-
-    public void prewarm() {
-        for (int i = 0; i < size; i++) {
-            final int idx = i;
-            new Thread(new Runnable() {
-                @Override public void run() {
-                    if (!sessions[idx].isReady() && locks[idx].tryLock()) {
-                        try {
-                            sessions[idx].warm();
-                            logger.log("[pool] prewarm slot#" + idx + " ok");
-                        } catch (Exception e) {
-                            logger.log("[pool] prewarm slot#" + idx + " failed: " + e.getMessage());
-                        } finally {
-                            locks[idx].unlock();
-                        }
-                    }
-                }
-            }, "prewarm-" + i).start();
-        }
     }
 }

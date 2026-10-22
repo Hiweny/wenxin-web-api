@@ -28,6 +28,10 @@ public class ApiRouter implements HttpServer.Handler {
     private final Logger logger;
     private final long startedAt = System.currentTimeMillis();
     private final String banner;
+    private volatile String lastPrompt = "";
+    private volatile String lastRawMessages = "[]";
+    private volatile boolean lastTools = false;
+    private volatile String lastAt = "";
 
     public ApiRouter(Config cfg, SessionPool pool, HistoryStore store, Logger logger, String banner) {
         this.cfg = cfg;
@@ -58,6 +62,16 @@ public class ApiRouter implements HttpServer.Handler {
         if ("/v1/chat/completions".equals(p) || "/chat/completions".equals(p)) { chat(req, res); return; }
         if ("/v1/history".equals(p) || "/history".equals(p)) { history(req, res); return; }
         if ("/debug/probe".equals(p)) { debugProbe(res); return; }
+        if ("/debug/last".equals(p)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("at", lastAt);
+            m.put("prompt_len", lastPrompt.length());
+            m.put("prompt", lastPrompt);
+            m.put("tools", lastTools);
+            m.put("raw_messages", lastRawMessages);
+            res.json(200, Json.write(m));
+            return;
+        }
         if ("/v1/pool".equals(p)) {
             res.json(200, Json.write(listToJson(pool.snapshot())));
             return;
@@ -152,37 +166,63 @@ public class ApiRouter implements HttpServer.Handler {
         boolean stream = Boolean.TRUE.equals(body.get("stream"));
         String model = Json.str(body, "model");
         if (model == null || model.isEmpty()) model = cfg.defaultModel;
-        boolean search = cfg.searchDefault;
         Map<String, Object> extra = Json.obj(body, "extra_body");
-        if (extra.get("search") instanceof Boolean) search = (Boolean) extra.get("search");
+
+        // 联网搜索：默认关闭（cfg.searchDefault），可用 body.search / extra_body.search 开启
+        boolean search = cfg.searchDefault;
         if (body.get("search") instanceof Boolean) search = (Boolean) body.get("search");
+        if (extra.get("search") instanceof Boolean) search = (Boolean) extra.get("search");
+
+        // 深度思考：默认开启（cfg.thinkDefault），可用 thinking:false / reasoning_effort:"none" 关闭
+        boolean think = cfg.thinkDefault;
+        if (body.get("thinking") instanceof Boolean) think = (Boolean) body.get("thinking");
+        if (extra.get("thinking") instanceof Boolean) think = (Boolean) extra.get("thinking");
+        Object effort = body.containsKey("reasoning_effort") ? body.get("reasoning_effort") : extra.get("reasoning_effort");
+        if (effort instanceof String) {
+            String e = ((String) effort).toLowerCase(Locale.ROOT);
+            if (e.equals("none") || e.equals("off") || e.equals("minimal")) think = false;
+        }
 
         PromptBuilder.Built built = PromptBuilder.build(messages, tools);
+        if (built.prompt == null || built.prompt.trim().isEmpty()) {
+            res.json(400, "{\"error\":{\"message\":\"empty prompt: messages 中没有可用的 user 内容\",\"type\":\"invalid_request_error\"}}");
+            return;
+        }
         String internalModel = WenxinSession.mapModel(model);
         String completionId = "chatcmpl-" + Long.toHexString(System.nanoTime());
         long created = System.currentTimeMillis() / 1000;
 
-        logger.log("[chat] model=" + model + " -> " + internalModel + " stream=" + stream
-                + " tools=" + built.toolsEnabled + " prompt=" + built.prompt.length() + "chars");
+        if (!built.images.isEmpty()) {
+            StringBuilder ib = new StringBuilder();
+            for (String u : built.images) ib.append(u.startsWith("data:") ? ("data:…(len=" + u.length() + ")") : u).append(' ');
+            logger.log("[chat] images=" + built.images.size() + " [" + Tools.truncate(ib.toString(), 120) + "]");
+        }
+        lastPrompt = Tools.truncate(built.prompt.replace("\n", " ⏎ "), 300);
+        lastRawMessages = Json.write(messages);
+        lastTools = built.toolsEnabled;
+        lastAt = Tools.nowIso();
+        logger.log("[chat] model=" + model + " -> " + internalModel + " stream=" + stream + " think=" + think
+                + " search=" + search + " tools=" + built.toolsEnabled + " msg=" + messages.size()
+                + " prompt=" + built.prompt.length() + "chars");
 
         if (stream) {
-            streamChat(res, built, internalModel, model, completionId, created, search);
+            streamChat(res, built, internalModel, model, completionId, created, search, think);
         } else {
-            blockChat(res, built, internalModel, model, completionId, created, search);
+            blockChat(res, built, internalModel, model, completionId, created, search, think);
         }
     }
 
-    private WenxinSession.Result runOnce(String prompt, String internalModel, boolean search, WenxinSession.Listener l) throws Exception {
+    private WenxinSession.Result runOnce(String prompt, String internalModel, boolean search, boolean think,
+                                        java.util.List<String> images, WenxinSession.Listener l) throws Exception {
         WenxinSession.Result last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
             SessionPool.Lease lease = pool.acquire(30000);
             try {
                 lease.session.totalCalls++;
-                WenxinSession.Result r = lease.session.chat(prompt, internalModel, search, l);
+                WenxinSession.Result r = lease.session.chat(prompt, internalModel, search, think, images, l);
                 boolean bad = r.error != null || (r.text.length() == 0 && !r.withdrew);
                 if (bad) {
                     lease.session.failCount++;
-                    lease.invalidate();
                     logger.log("[chat] attempt " + (attempt + 1) + " failed: " + r.error);
                     last = r;
                     if (l instanceof RetryAware && ((RetryAware) l).hasSent()) return r; // 已输出不能重试
@@ -206,8 +246,8 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void blockChat(HttpServer.Response res, PromptBuilder.Built built, String internalModel,
-                           String model, String id, long created, boolean search) throws Exception {
-        WenxinSession.Result r = runOnce(built.prompt, internalModel, search, null);
+                           String model, String id, long created, boolean search, boolean think) throws Exception {
+        WenxinSession.Result r = runOnce(built.prompt, internalModel, search, think, built.images, null);
         if (r == null) { res.json(502, "{\"error\":{\"message\":\"upstream unavailable\"}}"); return; }
 
         List<ToolBridge.Call> calls = built.toolsEnabled ? ToolBridge.parse(r.textStr()) : new ArrayList<ToolBridge.Call>();
@@ -227,6 +267,10 @@ public class ApiRouter implements HttpServer.Handler {
             sb.append("\"content\":");
             Json.quote(sb, text);
         }
+        if (r.think.length() > 0) {
+            sb.append(",\"reasoning_content\":");
+            Json.quote(sb, r.thinkStr());
+        }
         sb.append("},\"finish_reason\":").append(calls.isEmpty() ? "\"stop\"" : "\"tool_calls\"").append("}],");
         sb.append("\"usage\":{\"prompt_tokens\":").append(r.promptTokens)
                 .append(",\"completion_tokens\":").append(r.completionTokens)
@@ -237,9 +281,10 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void streamChat(HttpServer.Response res, PromptBuilder.Built built, String internalModel,
-                            String model, String id, long created, boolean search) throws Exception {
+                            String model, String id, long created, boolean search, boolean think) throws Exception {
         res.status = 200;
         res.headers.put("Content-Type", "text/event-stream; charset=utf-8");
+        res.headers.put("Cache-Control", "no-store");
         res.headers.put("Cache-Control", "no-cache");
         res.headers.put("X-Accel-Buffering", "no");
         res.chunked = true;
@@ -279,7 +324,7 @@ public class ApiRouter implements HttpServer.Handler {
 
         WenxinSession.Result r;
         try {
-            r = runOnce(built.prompt, internalModel, search, listener);
+            r = runOnce(built.prompt, internalModel, search, think, built.images, listener);
         } catch (ClientGone cg) {
             logger.log("[chat] client disconnected, upstream released");
             try { res.end(); } catch (Exception ignore) { }

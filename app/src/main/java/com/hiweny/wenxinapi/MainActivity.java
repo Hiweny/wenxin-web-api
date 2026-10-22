@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     private TextView statusText, poolText, baseUrl, btnToggle, logView, copyUrl, btnHistory, btnClearLog;
     private EditText apiKey, port;
     private Spinner modelSpinner;
-    private CheckBox switchSearch, switchFloat;
+    private CheckBox switchSearch, switchFloat, switchThink;
     private ScrollView logScroll;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Config cfg;
@@ -93,10 +93,12 @@ public class MainActivity extends Activity {
         modelSpinner = findViewById(R.id.modelSpinner);
         switchSearch = findViewById(R.id.switchSearch);
         switchFloat = findViewById(R.id.switchFloat);
+        switchThink = findViewById(R.id.switchThink);
 
         apiKey.setText(cfg.apiKey);
         port.setText(String.valueOf(cfg.port));
         switchSearch.setChecked(cfg.searchDefault);
+        switchThink.setChecked(cfg.thinkDefault);
         switchFloat.setChecked(Prefs.getAttr(this, "bubble", "0").equals("1"));
 
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, MODEL_LABELS);
@@ -122,6 +124,7 @@ public class MainActivity extends Activity {
                     i.putExtra("api_key", cfg.apiKey);
                     i.putExtra("model", cfg.defaultModel);
                     i.putExtra("search", cfg.searchDefault);
+                    i.putExtra("think", cfg.thinkDefault);
                     i.putExtra("pool", cfg.poolSize);
                     if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
                     else startService(i);
@@ -178,6 +181,7 @@ public class MainActivity extends Activity {
             i.putExtra("api_key", cfg.apiKey);
             i.putExtra("model", cfg.defaultModel);
             i.putExtra("search", cfg.searchDefault);
+            i.putExtra("think", cfg.thinkDefault);
             i.putExtra("pool", cfg.poolSize);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
             else startService(i);
@@ -206,6 +210,7 @@ public class MainActivity extends Activity {
         try { cfg.port = Integer.parseInt(port.getText().toString().trim()); } catch (Exception e) { cfg.port = 8787; }
         if (cfg.port < 1024 || cfg.port > 65535) cfg.port = 8787;
         cfg.searchDefault = switchSearch.isChecked();
+        cfg.thinkDefault = switchThink.isChecked();
         cfg.defaultModel = MODELS[Math.max(0, modelSpinner.getSelectedItemPosition())];
         Prefs.save(this, cfg);
     }
@@ -334,6 +339,7 @@ public class MainActivity extends Activity {
             i.putExtra("api_key", cfg.apiKey);
             i.putExtra("model", cfg.defaultModel);
             i.putExtra("search", cfg.searchDefault);
+            i.putExtra("think", cfg.thinkDefault);
             i.putExtra("pool", cfg.poolSize);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
             else startService(i);

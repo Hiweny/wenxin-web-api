@@ -115,6 +115,22 @@ public class WenxinSession {
 
         String url = HOME_URL;
         Http1Client.Response resp = null;
+        IOException lastErr = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                doWarm(h, url);
+                return;
+            } catch (IOException e) {
+                lastErr = e;
+                try { Thread.sleep(700L * (attempt + 1)); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        }
+        throw lastErr == null ? new IOException("warm failed") : lastErr;
+    }
+
+    private void doWarm(Map<String, String> h, String startUrl) throws IOException {
+        String url = startUrl;
+        Http1Client.Response resp = null;
         for (int i = 0; i < 4; i++) {
             resp = Http1Client.request(url, "GET", h, null, 15000, 25000);
             storeCookies(resp.setCookies);
@@ -199,6 +215,14 @@ public class WenxinSession {
     }
 
     public Map<String, Object> buildPayload(String query, String model, boolean search) {
+        return buildPayload(query, model, search, false);
+    }
+
+    public Map<String, Object> buildPayload(String query, String model, boolean search, boolean think) {
+        return buildPayload(query, model, search, think, null);
+    }
+
+    public Map<String, Object> buildPayload(String query, String model, boolean search, boolean think, java.util.List<String> images) {
         String q = query;
         Map<String, Object> agentInfo = new LinkedHashMap<>();
         agentInfo.put("agent_id", listOf(""));
@@ -216,9 +240,10 @@ public class WenxinSession {
         chatParams.put("scene", "");
 
         Map<String, Object> modelFunction = new LinkedHashMap<>();
-        modelFunction.put("thinkMode", "0");
-        modelFunction.put("deepSearch", "0");
+        modelFunction.put("thinkMode", think ? "1" : "0");
+        modelFunction.put("deepThink", think ? "1" : "0");
         modelFunction.put("internetSearch", search ? "1" : "0");
+        modelFunction.put("deepSearch", search ? "1" : "0");
 
         Map<String, Object> usedModel = new LinkedHashMap<>();
         usedModel.put("modelName", model);
@@ -254,9 +279,29 @@ public class WenxinSession {
         text.put("text_type", "");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("text", text);
+
+        List<Object> queryItems = new ArrayList<>();
+        // 图片先于文字下发：{type:IMAGE, data:{image:{image_url, upload_flag:1}}}
+        if (images != null) {
+            int n = 0;
+            for (String url : images) {
+                if (url == null || url.isEmpty()) continue;
+                if (n++ >= 4) break;
+                Map<String, Object> image = new LinkedHashMap<>();
+                image.put("image_url", url);
+                image.put("upload_flag", 1);
+                Map<String, Object> imageData = new LinkedHashMap<>();
+                imageData.put("image", image);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("type", "IMAGE");
+                item.put("data", imageData);
+                queryItems.add(item);
+            }
+        }
         Map<String, Object> q0 = new LinkedHashMap<>();
         q0.put("type", "TEXT");
         q0.put("data", data);
+        queryItems.add(q0);
 
         Map<String, Object> antiExt = new LinkedHashMap<>();
         antiExt.put("inputT", 1500);
@@ -268,7 +313,7 @@ public class WenxinSession {
         message.put("searchInfo", searchInfo);
         message.put("from", "");
         message.put("source", "wise_csaitab");
-        message.put("query", listOf(q0));
+        message.put("query", queryItems);
         message.put("anti_ext", antiExt);
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -285,6 +330,14 @@ public class WenxinSession {
     }
 
     public Result chat(String query, String model, boolean search, Listener listener) throws IOException {
+        return chat(query, model, search, false, listener);
+    }
+
+    public Result chat(String query, String model, boolean search, boolean think, Listener listener) throws IOException {
+        return chat(query, model, search, think, null, listener);
+    }
+
+    public Result chat(String query, String model, boolean search, boolean think, java.util.List<String> images, Listener listener) throws IOException {
         // 同一匿名身份保持最小请求间隔，降低触发风控的概率
         long gap = System.currentTimeMillis() - lastUsed;
         if (lastUsed > 0 && gap < minGapMs) {
@@ -293,7 +346,7 @@ public class WenxinSession {
         lastUsed = System.currentTimeMillis();
         long t0 = System.currentTimeMillis();
         Result r = new Result();
-        Map<String, Object> body = buildPayload(query, model, search);
+        Map<String, Object> body = buildPayload(query, model, search, think, images);
         byte[] payload = Json.write(body).getBytes(StandardCharsets.UTF_8);
 
         Map<String, String> h = new LinkedHashMap<>();
@@ -427,16 +480,25 @@ public class WenxinSession {
                 if (r.firstTokenMs < 0) r.firstTokenMs = System.currentTimeMillis() - t0;
                 if (Boolean.TRUE.equals(g.get("isFinished")) && r.error == null) { /* keep */ }
             }
-            // 思考链
+            // 思考链（thinkingSteps 的 reasoningContentArr[0] 是增量片段；个别版本是全量，两种都兼容）
             List<Object> rc = Json.arr(d, "reasoningContentArr");
-            if (!rc.isEmpty() && rc.get(0) instanceof String) {
-                String full = (String) rc.get(0);
-                if (full.length() > r.think.length()) {
-                    String add = full.substring(r.think.length());
+            if (!rc.isEmpty() && rc.get(0) instanceof String && !((String) rc.get(0)).isEmpty()) {
+                String tpiece = (String) rc.get(0);
+                String cur = r.think.toString();
+                if (tpiece.length() > cur.length() && tpiece.startsWith(cur)) {
+                    String add = tpiece.substring(cur.length());
                     r.think.setLength(0);
-                    r.think.append(full);
+                    r.think.append(tpiece);
                     if (l != null) l.onThink(add);
+                } else {
+                    r.think.append(tpiece);
+                    if (l != null) l.onThink(tpiece);
                 }
+            }
+            String rc2 = Json.str(d, "reasoningContent");
+            if ((rc.isEmpty()) && rc2 != null && !rc2.isEmpty() && !r.think.toString().endsWith(rc2)) {
+                r.think.append(rc2);
+                if (l != null) l.onThink(rc2);
             }
             Object um = d.get("usedModel");
             if (um instanceof String && !((String) um).isEmpty()) {
