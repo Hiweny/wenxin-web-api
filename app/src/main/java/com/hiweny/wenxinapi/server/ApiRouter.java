@@ -200,6 +200,11 @@ public class ApiRouter implements HttpServer.Handler {
 
     public interface RetryAware { boolean hasSent(); }
 
+    /** 客户端提前断开 */
+    static class ClientGone extends RuntimeException {
+        ClientGone() { super("client gone"); }
+    }
+
     private void blockChat(HttpServer.Response res, PromptBuilder.Built built, String internalModel,
                            String model, String id, long created, boolean search) throws Exception {
         WenxinSession.Result r = runOnce(built.prompt, internalModel, search, null);
@@ -251,12 +256,17 @@ public class ApiRouter implements HttpServer.Handler {
                 try {
                     String emit = gate.feed(text);
                     if (!emit.isEmpty()) sendChunk(res, id, model, created, contentDelta(emit), null, null);
-                } catch (Exception ignore) { }
+                } catch (Exception e) {
+                    // 客户端已断开：抛出让上游流尽快结束，避免白烧配额
+                    throw new ClientGone();
+                }
             }
             @Override public void onThink(String think) {
                 try {
                     sendChunk(res, id, model, created, "{\"reasoning_content\":" + quote(think) + "}", null, null);
-                } catch (Exception ignore) { }
+                } catch (Exception e) {
+                    throw new ClientGone();
+                }
             }
             @Override public void onModel(String m) { }
             @Override public void onWithdraw(String reason) {
@@ -270,6 +280,10 @@ public class ApiRouter implements HttpServer.Handler {
         WenxinSession.Result r;
         try {
             r = runOnce(built.prompt, internalModel, search, listener);
+        } catch (ClientGone cg) {
+            logger.log("[chat] client disconnected, upstream released");
+            try { res.end(); } catch (Exception ignore) { }
+            return;
         } catch (Exception e) {
             logger.log("[chat] stream error: " + e);
             sendChunk(res, id, model, created, "{}", "stop", null);
