@@ -1,0 +1,98 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  protocol-probe:
+    name: 协议冒烟测试（真实接口）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: 编译核心协议层
+        run: |
+          mkdir -p /tmp/wxout
+          javac -encoding UTF-8 -d /tmp/wxout $(find app/src/main/java/com/hiweny/wenxinapi/core -name '*.java') tools/ProbeMain.java
+      - name: 直连文心（免登录）冒烟
+        run: |
+          for m in deepseek-v4-pro deepseek-v4-flash; do
+            echo "=== $m ==="
+            java -cp /tmp/wxout com.hiweny.wenxinapi.core.ProbeMain "只回复：OK" "$m" || true
+          done
+      - name: 路由层冒烟（本地 HTTP + OpenAI 兼容）
+        run: |
+          mkdir -p /tmp/wxout2
+          javac -encoding UTF-8 -d /tmp/wxout2 $(find app/src/main/java/com/hiweny/wenxinapi/core app/src/main/java/com/hiweny/wenxinapi/server -name '*.java') tools/JvmServerMain.java
+          nohup java -cp /tmp/wxout2 com.hiweny.wenxinapi.JvmServerMain 18787 > /tmp/srv.log 2>&1 &
+          sleep 8
+          echo "--- healthz ---"
+          curl -s --max-time 20 http://127.0.0.1:18787/healthz
+          echo
+          echo "--- models ---"
+          curl -s --max-time 20 http://127.0.0.1:18787/v1/models
+          echo
+          echo "--- non-stream ---"
+          curl -s --max-time 150 -X POST http://127.0.0.1:18787/v1/chat/completions \
+            -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
+            -d '{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"只回复：OK"}]}'
+          echo
+          echo "--- stream ---"
+          curl -s --max-time 150 -N -X POST http://127.0.0.1:18787/v1/chat/completions \
+            -H 'Content-Type: application/json' -H 'Authorization: Bearer sk-wenxin' \
+            -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"数到三"}]}' | head -40
+          echo
+          echo "--- server log ---"
+          cat /tmp/srv.log
+
+  build-apk:
+    name: 构建 APK
+    runs-on: ubuntu-latest
+    env:
+      KS_B64: ${{ secrets.WX_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+      - name: 解码签名密钥
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "WX_KEYSTORE=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
+            echo "keystore decoded"
+          else
+            echo "no keystore secret, will build unsigned/debug-signed release"
+          fi
+      - name: Gradle 构建
+        env:
+          WX_KEYSTORE_PASSWORD: ${{ secrets.WX_KEYSTORE_PASSWORD }}
+          WX_KEY_ALIAS: ${{ secrets.WX_KEY_ALIAS }}
+          WX_KEY_PASSWORD: ${{ secrets.WX_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - name: 收集产物
+        run: |
+          mkdir -p out
+          find app/build/outputs/apk -name '*.apk' -exec cp {} out/ \;
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: out/*.apk
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
+          generate_release_notes: true

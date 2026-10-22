@@ -1,0 +1,52 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNo = (System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+if (!buildNo.isInteger()) { buildNo = "1" }
+
+android {
+    namespace 'com.hiweny.wenxinapi'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.hiweny.wenxinapi"
+        minSdk 24
+        targetSdk 34
+        versionCode buildNo.toInteger()
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv("WX_KEYSTORE")
+            if (ks != null && new File(ks).exists()) {
+                storeFile file(ks)
+                storePassword System.getenv("WX_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("WX_KEY_ALIAS") ?: "wenxinapi"
+                keyPassword System.getenv("WX_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv("WX_KEYSTORE") != null) { signingConfig signingConfigs.release }
+        }
+        debug { minifyEnabled false }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+}
