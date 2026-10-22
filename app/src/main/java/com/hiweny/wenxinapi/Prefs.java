@@ -14,7 +14,8 @@ public class Prefs {
         Config c = new Config();
         c.port = sp.getInt("port", 8787);
         c.apiKey = sp.getString("api_key", "sk-wenxin");
-        c.poolSize = sp.getInt("pool", 3);
+        c.poolSize = sp.getInt("pool", 4);
+        if (c.poolSize < 4) c.poolSize = 4;   // 旧版本默认 3，升级后统一提到 4（补货已并发化）
         c.defaultModel = sp.getString("model", "deepseek-v4-pro");
         c.searchDefault = sp.getBoolean("search", false);
         c.thinkDefault = sp.getBoolean("think", true);

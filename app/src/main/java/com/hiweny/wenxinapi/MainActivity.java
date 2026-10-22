@@ -36,9 +36,9 @@ public class MainActivity extends Activity {
 
     private static final String[] MODELS = {"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-r1", "ernie-5.1", "smartmode"};
     private static final String[] MODEL_LABELS = {
-            "V4 Pro（推荐）",
-            "V4 Flash（更快）",
-            "R1（深思）",
+            "V4 Pro",
+            "V4 Flash",
+            "R1 深思",
             "文心 5.1",
             "智能模式"
     };
@@ -145,7 +145,21 @@ public class MainActivity extends Activity {
         switchThink.setChecked(cfg.thinkDefault);
         switchFloat.setChecked(Prefs.getAttr(this, "bubble", "0").equals("1"));
 
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, MODEL_LABELS);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, MODEL_LABELS) {
+            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                tv.setTextSize(13f);
+                tv.setTextColor(0xFFE7EAF0);
+                tv.setSingleLine(true);
+                return tv;
+            }
+            @Override public View getDropDownView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView tv = (TextView) super.getDropDownView(position, convertView, parent);
+                tv.setTextSize(14f);
+                tv.setTextColor(0xFFE7EAF0);
+                return tv;
+            }
+        };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         modelSpinner.setAdapter(adapter);
         for (int i = 0; i < MODELS.length; i++) {

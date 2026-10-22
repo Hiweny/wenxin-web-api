@@ -264,7 +264,7 @@
                 android:layout_marginTop="6dp"
                 android:buttonTint="@color/accent"
                 android:paddingLeft="2dp"
-                android:text="深度思考（响应更慢，但更严谨）"
+                android:text="深度思考（更严谨，但更慢）"
                 android:textColor="@color/text"
                 android:textSize="13sp" />
 
@@ -275,7 +275,7 @@
                 android:layout_marginTop="2dp"
                 android:buttonTint="@color/accent"
                 android:paddingLeft="2dp"
-                android:text="联网搜索（更慢，需要实时信息时再开）"
+                android:text="联网搜索（需要实时信息时再开）"
                 android:textColor="@color/text"
                 android:textSize="13sp" />
 
