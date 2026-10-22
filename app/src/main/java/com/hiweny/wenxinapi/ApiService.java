@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 
+import com.hiweny.wenxinapi.core.ApiActivity;
 import com.hiweny.wenxinapi.core.Config;
 import com.hiweny.wenxinapi.core.HistoryStore;
 import com.hiweny.wenxinapi.core.SessionPool;
@@ -39,6 +40,9 @@ public class ApiService extends Service {
     private Config cfg;
     private PowerManager.WakeLock wakeLock;
     private FloatingBubble bubble;
+    private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private volatile String stateLabel = "待命";
+    private volatile long lastNotifyAt = 0;
 
     /** 根据配置开关悬浮球 */
     public void syncBubble() {
@@ -84,6 +88,21 @@ public class ApiService extends Service {
             @Override public void log(String line) { Log.add(line); }
         });
         POOL_SIZE = cfg.poolSize;
+        ApiActivity.setSink(new ApiActivity.Sink() {
+            @Override public void onState(ApiActivity.State st) {
+                final String label = st.label();
+                uiHandler.post(new Runnable() {
+                    @Override public void run() {
+                        stateLabel = label;
+                        long now = System.currentTimeMillis();
+                        // 通知更新节流：思考/输出阶段最多每 500ms 一次，避免刷屏耗电
+                        if (now - lastNotifyAt < 500 && !label.contains("就绪")) return;
+                        lastNotifyAt = now;
+                        updateNotification();
+                    }
+                });
+            }
+        });
     }
 
     @Override
@@ -153,6 +172,7 @@ public class ApiService extends Service {
         RUNNING = false;
         BASE_URL = "";
         releaseWakeLock();
+        stateLabel = "待命";
         Log.add("[svc] 服务已停止");
         notifyState();
     }
@@ -208,9 +228,12 @@ public class ApiService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL)
                 : new Notification.Builder(this);
-        b.setContentTitle("文心 Web API 运行中")
+        String label = stateLabel == null ? "待命" : stateLabel;
+        boolean busy = label.contains("思考") || label.contains("输出中");
+        b.setContentTitle("文心API · " + label)
                 .setContentText(BASE_URL.isEmpty() ? "点击查看详情" : BASE_URL)
-                .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                .setSubText(busy ? "处理中" : "服务运行中")
+                .setSmallIcon(R.drawable.ic_stat)
                 .setOngoing(true)
                 .setContentIntent(pi)
                 .addAction(new Notification.Action.Builder(
@@ -246,7 +269,7 @@ public class ApiService extends Service {
                 + "code{background:#141821;border:1px solid #232a38;border-radius:8px;padding:2px 6px;font-family:ui-monospace,Menlo,monospace}"
                 + ".card{background:#141821;border:1px solid #232a38;border-radius:16px;padding:18px;margin-top:16px}"
                 + "a{color:#5b8cff}</style></head><body>"
-                + "<h1>文心 Web API</h1><p>OpenAI 兼容接口已就绪</p>"
+                + "<h1>文心API</h1><p>OpenAI 兼容接口已就绪</p>"
                 + "<div class='card'><p>Base URL</p><code>http://" + firstIp() + ":" + cfg.port + "/v1</code>"
                 + "<p style='margin-top:14px'>Endpoints</p><p><code>POST /v1/chat/completions</code><br>"
                 + "<code>GET /v1/models</code><br><code>GET /v1/history</code><br><code>GET /healthz</code></p></div>"

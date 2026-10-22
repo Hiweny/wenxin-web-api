@@ -51,35 +51,41 @@ public class SessionPool {
 
     public void start() {
         if (refiller != null) return;
-        refiller = new Thread(new Runnable() {
-            @Override public void run() {
-                while (!closed) {
-                    WenxinSession s = null;
-                    synchronized (ready) {
-                        if (ready.size() >= size) {
-                            try { ready.wait(500); } catch (InterruptedException e) { return; }
-                            continue;
-                        }
-                    }
-                    try {
-                        s = new WenxinSession();
-                        s.warm();
-                        synchronized (ready) {
-                            if (ready.size() < size) {
-                                ready.addLast(s);
-                                ready.notifyAll();
-                            }
-                        }
-                    } catch (Exception e) {
-                        logger.log("[pool] warm failed: " + e.getMessage());
-                        try { Thread.sleep(800); } catch (InterruptedException ie) { return; }
-                    }
+        // 两条补货线程：单条线程时，一个 300~800ms 的 warm 会挡住下一个身份的预热，
+        // 池子被瞬间抽空后请求就得现场等。两路并发能把「池空等待」压到接近 0。
+        for (int k = 0; k < 2; k++) {
+            Thread t = new Thread(new Runnable() {
+                @Override public void run() { refillLoop(); }
+            }, "session-refill-" + k);
+            t.setDaemon(true);
+            t.start();
+            if (k == 0) refiller = t;
+        }
+        logger.log("[pool] 一次性身份池已启动，容量 " + size);
+    }
+
+    private void refillLoop() {
+        while (!closed) {
+            synchronized (ready) {
+                if (ready.size() >= size) {
+                    try { ready.wait(400); } catch (InterruptedException e) { return; }
+                    continue;
                 }
             }
-        }, "session-refill");
-        refiller.setDaemon(true);
-        refiller.start();
-        logger.log("[pool] 一次性身份池已启动，容量 " + size);
+            try {
+                WenxinSession s = new WenxinSession();
+                s.warm();
+                synchronized (ready) {
+                    if (ready.size() < size) {
+                        ready.addLast(s);
+                        ready.notifyAll();
+                    }
+                }
+            } catch (Exception e) {
+                logger.log("[pool] warm failed: " + e.getMessage());
+                try { Thread.sleep(600); } catch (InterruptedException ie) { return; }
+            }
+        }
     }
 
     public void stop() {

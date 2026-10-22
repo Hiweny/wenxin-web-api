@@ -15,106 +15,148 @@
         android:orientation="vertical"
         android:paddingLeft="18dp"
         android:paddingRight="18dp"
-        android:paddingTop="26dp"
-        android:paddingBottom="28dp">
+        android:paddingTop="24dp"
+        android:paddingBottom="26dp">
 
-        <!-- 标题 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="文心 Web API"
-            android:textColor="@color/text"
-            android:textSize="26sp"
-            android:textStyle="bold"
-            android:letterSpacing="-0.02" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
-            android:text="免登录 · DeepSeek V4 Pro / Flash · OpenAI 兼容"
-            android:textColor="@color/muted"
-            android:textSize="13sp" />
-
-        <!-- 状态行 -->
+        <!-- 品牌区 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <View
-                android:id="@+id/dot"
-                android:layout_width="9dp"
-                android:layout_height="9dp"
-                android:background="@drawable/bg_dot_off" />
+            <ImageView
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_mark" />
 
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="8dp"
-                android:text="已停止"
-                android:textColor="@color/muted"
-                android:textSize="13sp" />
+                android:layout_marginLeft="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/poolText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="right"
-                android:text="会话池 3"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="-0.01"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="OpenAI 兼容 · 免登录 · 手机即服务端"
+                    android:textColor="@color/muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- 接口地址 -->
+        <!-- 状态卡 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:background="@drawable/bg_card"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_gradient_card"
             android:orientation="vertical"
             android:padding="16dp">
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/dot"
+                    android:layout_width="9dp"
+                    android:layout_height="9dp"
+                    android:background="@drawable/bg_dot_off" />
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
+                    android:text="已停止"
+                    android:textColor="@color/muted"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/poolText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="right"
+                    android:text="会话池 0"
+                    android:textColor="@color/muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:letterSpacing="0.12"
                 android:text="BASE URL"
                 android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.12" />
+                android:textSize="11sp" />
 
-            <TextView
-                android:id="@+id/baseUrl"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:background="@drawable/bg_inner"
-                android:padding="12dp"
-                android:fontFamily="monospace"
-                android:text="http://127.0.0.1:8787/v1"
-                android:textColor="@color/text"
-                android:textIsSelectable="true"
-                android:textSize="13sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/baseUrl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_inner"
+                    android:fontFamily="monospace"
+                    android:padding="12dp"
+                    android:text="http://127.0.0.1:8787/v1"
+                    android:textColor="@color/text"
+                    android:textIsSelectable="true"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/copyUrl"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="10dp"
+                    android:background="@drawable/bg_chip"
+                    android:paddingLeft="16dp"
+                    android:paddingTop="11dp"
+                    android:paddingRight="16dp"
+                    android:paddingBottom="11dp"
+                    android:text="复制"
+                    android:textColor="@color/accent"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
             <TextView
-                android:id="@+id/copyUrl"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_chip"
-                android:paddingLeft="14dp"
-                android:paddingRight="14dp"
-                android:paddingTop="7dp"
-                android:paddingBottom="7dp"
-                android:text="复制地址"
-                android:textColor="@color/accent"
-                android:textSize="12sp" />
+                android:id="@+id/btnToggle"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_primary"
+                android:gravity="center"
+                android:text="启动服务"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- 配置 -->
+        <!-- 参数卡 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -126,10 +168,10 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="API KEY"
+                android:letterSpacing="0.1"
+                android:text="接口密钥"
                 android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.12" />
+                android:textSize="11sp" />
 
             <EditText
                 android:id="@+id/apiKey"
@@ -146,122 +188,117 @@
                 android:textColorHint="@color/muted"
                 android:textSize="13sp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="端口"
-                android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.12" />
-
-            <EditText
-                android:id="@+id/port"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_inner"
-                android:fontFamily="monospace"
-                android:inputType="number"
-                android:padding="12dp"
-                android:singleLine="true"
-                android:text="8787"
-                android:textColor="@color/text"
-                android:textSize="13sp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="默认模型"
-                android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.12" />
-
-            <Spinner
-                android:id="@+id/modelSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_inner"
-                android:paddingLeft="14dp"
-                android:paddingRight="14dp" />
-
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:gravity="center_vertical"
+                android:layout_marginTop="14dp"
                 android:orientation="horizontal">
 
-                <CheckBox
-                    android:id="@+id/switchThink"
+                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginRight="6dp"
                     android:layout_weight="1"
-                    android:buttonTint="@color/accent"
-                    android:paddingLeft="0dp"
-                    android:text="深度思考"
-                    android:textColor="@color/text"
-                    android:textSize="12.5sp" />
+                    android:orientation="vertical">
 
-                <CheckBox
-                    android:id="@+id/switchSearch"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:buttonTint="@color/accent"
-                    android:paddingLeft="0dp"
-                    android:text="联网搜索"
-                    android:textColor="@color/text"
-                    android:textSize="12.5sp" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.1"
+                        android:text="端口"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
 
-                <CheckBox
-                    android:id="@+id/switchFloat"
+                    <EditText
+                        android:id="@+id/port"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_inner"
+                        android:fontFamily="monospace"
+                        android:inputType="number"
+                        android:padding="12dp"
+                        android:singleLine="true"
+                        android:text="8787"
+                        android:textColor="@color/text"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:buttonTint="@color/accent"
-                    android:paddingLeft="0dp"
-                    android:text="悬浮星星"
-                    android:textColor="@color/text"
-                    android:textSize="12.5sp" />
+                    android:layout_marginLeft="6dp"
+                    android:layout_weight="1.35"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.1"
+                        android:text="默认模型"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
+
+                    <Spinner
+                        android:id="@+id/modelSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="47dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_inner"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="12dp" />
+                </LinearLayout>
             </LinearLayout>
 
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="6dp"
+                android:background="#1E2532" />
+
+            <CheckBox
+                android:id="@+id/switchThink"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:buttonTint="@color/accent"
+                android:paddingLeft="2dp"
+                android:text="深度思考（响应更慢，但更严谨）"
+                android:textColor="@color/text"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/switchSearch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:buttonTint="@color/accent"
+                android:paddingLeft="2dp"
+                android:text="联网搜索（更慢，需要实时信息时再开）"
+                android:textColor="@color/text"
+                android:textSize="13sp" />
+
+            <CheckBox
+                android:id="@+id/switchFloat"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:buttonTint="@color/accent"
+                android:paddingLeft="2dp"
+                android:text="悬浮图标（点按打开，长按隐藏，可拖动贴边）"
+                android:textColor="@color/text"
+                android:textSize="13sp" />
         </LinearLayout>
 
-        <!-- 主按钮 -->
-        <TextView
-            android:id="@+id/btnToggle"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="14dp"
-            android:background="@drawable/bg_primary"
-            android:gravity="center"
-            android:text="启动服务"
-            android:textColor="#FFFFFF"
-            android:textSize="15sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/btnHistory"
-            android:layout_width="match_parent"
-            android:layout_height="46dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/bg_ghost"
-            android:gravity="center"
-            android:text="防撤回记录"
-            android:textColor="@color/text"
-            android:textSize="14sp" />
-
-        <!-- 日志 -->
+        <!-- 日志卡 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -273,19 +310,34 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:letterSpacing="0.1"
                     android:text="运行日志"
-                    android:textColor="@color/text"
-                    android:textSize="13sp" />
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnHistory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_chip"
+                    android:paddingLeft="13dp"
+                    android:paddingTop="6dp"
+                    android:paddingRight="13dp"
+                    android:paddingBottom="6dp"
+                    android:text="对话存档"
+                    android:textColor="@color/accent"
+                    android:textSize="11sp" />
 
                 <TextView
                     android:id="@+id/btnClearLog"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
                     android:background="@drawable/bg_chip"
-                    android:paddingLeft="12dp"
-                    android:paddingRight="12dp"
-                    android:paddingTop="5dp"
-                    android:paddingBottom="5dp"
+                    android:paddingLeft="13dp"
+                    android:paddingTop="6dp"
+                    android:paddingRight="13dp"
+                    android:paddingBottom="6dp"
                     android:text="清空"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
@@ -294,30 +346,42 @@
             <ScrollView
                 android:id="@+id/logScroll"
                 android:layout_width="match_parent"
-                android:layout_height="220dp"
+                android:layout_height="208dp"
                 android:layout_marginTop="10dp"
-                android:background="@drawable/bg_inner"
-                android:padding="10dp">
+                android:background="@drawable/bg_log"
+                android:fadeScrollbars="true"
+                android:padding="10dp"
+                android:scrollbarStyle="insideOverlay"
+                android:scrollbars="vertical">
 
                 <TextView
                     android:id="@+id/log"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
                     android:text=""
                     android:textColor="#93A0B5"
                     android:textIsSelectable="true"
                     android:textSize="10.5sp" />
             </ScrollView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="向上滑动可暂停自动滚动，回到底部恢复跟随"
+                android:textColor="#525B6B"
+                android:textSize="10.5sp" />
         </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="16dp"
             android:gravity="center"
             android:text="仅供个人学习研究，请遵守平台服务条款"
-            android:textColor="#5C6577"
+            android:textColor="#4E5666"
             android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

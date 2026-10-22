@@ -4,7 +4,7 @@ package com.hiweny.wenxinapi.core;
 public class Config {
     public int port = 8787;
     public String apiKey = "sk-wenxin";
-    public int poolSize = 3;
+    public int poolSize = 4;
     public String defaultModel = "deepseek-v4-pro";
     public boolean searchDefault = false;
     public boolean thinkDefault = true;

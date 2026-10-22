@@ -34,6 +34,8 @@ public final class Http1Client {
         public final List<String> setCookies = new ArrayList<>();
         public InputStream body;
         public Socket socket;
+        /** keep-alive：读完响应体后不要关闭底层 socket，交给调用方复用 */
+        public boolean keepSocket = false;
 
         public String header(String name) {
             for (Map.Entry<String, String> e : headers.entrySet()) {
@@ -68,12 +70,44 @@ public final class Http1Client {
 
         public void close() {
             try { if (body != null) body.close(); } catch (Exception ignore) { }
+            if (keepSocket) return;   // 交给调用方复用
             try { if (socket != null) socket.close(); } catch (Exception ignore) { }
+        }
+
+        /** 交出底层 socket（keep-alive 复用），之后 close() 不再关闭它 */
+        public Socket detachSocket() {
+            Socket s = socket;
+            keepSocket = true;
+            return s;
         }
     }
 
     public static Response request(String urlStr, String method, Map<String, String> extraHeaders,
                                    byte[] payload, int connectTimeoutMs, int readTimeoutMs) throws IOException {
+        return request(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs, false, null);
+    }
+
+    /**
+     * 可复用连接版本：warm 阶段用 keep-alive 拿到 socket，随后的 POST 直接复用同一条 TLS 连接，
+     * 省掉一次 TCP + TLS 握手（手机上通常 200~600ms，是"首字慢"的主要来源之一）。
+     * 复用失败会自动回退到新建连接重试一次。
+     */
+    public static Response request(String urlStr, String method, Map<String, String> extraHeaders,
+                                   byte[] payload, int connectTimeoutMs, int readTimeoutMs,
+                                   boolean keepAlive, Socket reuse) throws IOException {
+        if (reuse != null) {
+            try {
+                return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs, keepAlive, reuse, false);
+            } catch (IOException e) {
+                try { reuse.close(); } catch (Exception ignore) { }
+            }
+        }
+        return doRequest(urlStr, method, extraHeaders, payload, connectTimeoutMs, readTimeoutMs, keepAlive, null, true);
+    }
+
+    private static Response doRequest(String urlStr, String method, Map<String, String> extraHeaders,
+                                      byte[] payload, int connectTimeoutMs, int readTimeoutMs,
+                                      boolean keepAlive, Socket pooled, boolean fresh) throws IOException {
         URL url = new URL(urlStr);
         boolean https = "https".equalsIgnoreCase(url.getProtocol());
         String host = url.getHost();
@@ -81,23 +115,28 @@ public final class Http1Client {
         String path = url.getFile();
         if (path == null || path.isEmpty()) path = "/";
 
-        Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
-        socket.setSoTimeout(readTimeoutMs);
-        socket.setTcpNoDelay(true);
-
-        if (https) {
-            SSLSocketFactory f = (SSLSocketFactory) SSLSocketFactory.getDefault();
-            SSLSocket ssl = (SSLSocket) f.createSocket(socket, host, port, true);
-            try {
-                SSLParameters p = ssl.getSSLParameters();
-                p.setServerNames(java.util.Collections.singletonList(new javax.net.ssl.SNIHostName(host)));
-                ssl.setSSLParameters(p);
-            } catch (Throwable ignore) { }
-            ssl.setUseClientMode(true);
-            ssl.startHandshake();
-            socket = ssl;
+        Socket socket;
+        if (pooled != null) {
+            socket = pooled;
+        } else {
+            socket = new Socket();
+            socket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
+            socket.setSoTimeout(readTimeoutMs);
+            socket.setTcpNoDelay(true);
+            if (https) {
+                SSLSocketFactory f = (SSLSocketFactory) SSLSocketFactory.getDefault();
+                SSLSocket ssl = (SSLSocket) f.createSocket(socket, host, port, true);
+                try {
+                    SSLParameters p = ssl.getSSLParameters();
+                    p.setServerNames(java.util.Collections.singletonList(new javax.net.ssl.SNIHostName(host)));
+                    ssl.setSSLParameters(p);
+                } catch (Throwable ignore) { }
+                ssl.setUseClientMode(true);
+                ssl.startHandshake();
+                socket = ssl;
+            }
         }
+        socket.setSoTimeout(readTimeoutMs);
 
         StringBuilder sb = new StringBuilder();
         sb.append(method).append(' ').append(path).append(" HTTP/1.1\r\n");
@@ -111,14 +150,16 @@ public final class Http1Client {
         if (payload != null) {
             sb.append("Content-Length: ").append(payload.length).append("\r\n");
         }
-        sb.append("Connection: close\r\n\r\n");
+        sb.append(keepAlive ? "Connection: keep-alive\r\n\r\n" : "Connection: close\r\n\r\n");
 
         OutputStream out = new BufferedOutputStream(socket.getOutputStream(), 8192);
         out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         if (payload != null) out.write(payload);
         out.flush();
 
-        InputStream in = socket.getInputStream();
+        // 关键性能点：必须用带缓冲的流。SSLSocket 的原始流每 read() 一次就是一次 JNI + 解密，
+        // 逐字节解析 SSE 会让手机端慢 10 倍以上（表现为"思考/流式输出很慢"）。
+        InputStream in = new java.io.BufferedInputStream(socket.getInputStream(), 16384);
         String statusLine = readLineRaw(in);
         if (statusLine == null) throw new IOException("empty response");
         Response res = new Response();
@@ -134,6 +175,7 @@ public final class Http1Client {
             res.headers.put(k, v);
         }
         res.socket = socket;
+        res.keepSocket = keepAlive;
 
         String te = res.header("Transfer-Encoding");
         String cl = res.header("Content-Length");
@@ -177,9 +219,21 @@ public final class Http1Client {
         ChunkedInputStream(InputStream in) { this.in = in; }
 
         @Override public int read() throws IOException {
-            byte[] b = new byte[1];
-            int n = read(b, 0, 1);
-            return n < 0 ? -1 : (b[0] & 0xff);
+            if (eof) return -1;
+            if (remaining == 0) {
+                String line = readLineRaw(in);
+                if (line == null) { eof = true; return -1; }
+                while (line.isEmpty()) { line = readLineRaw(in); if (line == null) { eof = true; return -1; } }
+                int sc = line.indexOf(';');
+                if (sc >= 0) line = line.substring(0, sc);
+                try { remaining = Integer.parseInt(line.trim(), 16); } catch (Exception e) { eof = true; return -1; }
+                if (remaining <= 0) { eof = true; return -1; }
+            }
+            int c = in.read();
+            if (c < 0) { eof = true; return -1; }
+            remaining--;
+            if (remaining == 0) { readLineRaw(in); }
+            return c;
         }
 
         @Override public int read(byte[] buf, int off, int len) throws IOException {

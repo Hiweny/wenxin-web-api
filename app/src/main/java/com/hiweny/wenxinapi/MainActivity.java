@@ -51,16 +51,60 @@ public class MainActivity extends Activity {
     private ScrollView logScroll;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Config cfg;
-    private final Runnable logTick = new Runnable() {
+    private final StringBuilder logBuf = new StringBuilder();
+    private boolean logDirty = false;
+    private boolean stickBottom = true;
+    private boolean touchingLog = false;
+
+    /** 增量刷新：只 append 新行，绝不整体 setText（整体重建会闪、会顶动外层滚动、会丢选区） */
+    private final Runnable logFlush = new Runnable() {
         @Override public void run() {
-            logView.setText(Log.text());
-            // 只滚动日志框自身，绝不触发外层 ScrollView 联动（否则页面会被"顶"到日志区）
-            logScroll.post(new Runnable() {
-                @Override public void run() { logScroll.scrollTo(0, logView.getBottom()); }
-            });
-            ui.postDelayed(this, 700);
+            String chunk;
+            synchronized (logBuf) {
+                if (!logDirty) return;
+                logDirty = false;
+                chunk = logBuf.toString();
+                logBuf.setLength(0);
+            }
+            logView.append(chunk);
+            if (stickBottom && !touchingLog) {
+                logScroll.post(new Runnable() {
+                    @Override public void run() { logScroll.fullScroll(View.FOCUS_DOWN); }
+                });
+            }
         }
     };
+
+    private final Log.Listener logListener = new Log.Listener() {
+        @Override public void onLine(String line) {
+            synchronized (logBuf) {
+                logBuf.append(line).append('\n');
+                logDirty = true;
+                // 环形缓冲裁剪后行数会远少于 UI 文本；超过上限时重排一次（低频，不会闪）
+                if (logBuf.length() > 24000) {
+                    logBuf.setLength(0);
+                    final String all = Log.text();
+                    ui.post(new Runnable() { @Override public void run() { logView.setText(all); } });
+                }
+            }
+            ui.removeCallbacks(logFlush);
+            ui.postDelayed(logFlush, 120);
+        }
+        @Override public void onCleared() {
+            synchronized (logBuf) { logBuf.setLength(0); logDirty = false; }
+            ui.post(new Runnable() { @Override public void run() { logView.setText(""); } });
+        }
+    };
+
+    private boolean atLogBottom() {
+        View child = logScroll.getChildAt(0);
+        if (child == null) return true;
+        return logScroll.getScrollY() + logScroll.getHeight() >= child.getBottom() - dp(14);
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
     private final Runnable stateTick = new Runnable() {
         @Override public void run() {
             refreshState();
@@ -202,10 +246,43 @@ public class MainActivity extends Activity {
             @Override public void run() { rootScroll.scrollTo(0, 0); apiKey.clearFocus(); port.clearFocus(); }
         }, 600);
 
-        Log.subscribe(logTick);
+        logView.setText(joinLines(Log.tail(300)));
+        Log.subscribe(logListener);
+
+        // 日志区是嵌套在页面 ScrollView 里的独立滚动区：
+        // 手指按在日志上时禁止外层拦截，否则"滑不动"，而且松手后外层会把日志顶走。
+        final ScrollView rootScroll2 = findViewById(R.id.rootScroll);
+        logScroll.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, android.view.MotionEvent e) {
+                if (e.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                    touchingLog = true;
+                    rootScroll2.requestDisallowInterceptTouchEvent(true);
+                } else if (e.getAction() == android.view.MotionEvent.ACTION_UP
+                        || e.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                    touchingLog = false;
+                    stickBottom = atLogBottom();
+                    rootScroll2.requestDisallowInterceptTouchEvent(false);
+                }
+                return false;
+            }
+        });
+
         Log.add("[ui] 界面已就绪");
-        ui.post(logTick);
         ui.post(stateTick);
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.unsubscribe(logListener);
+        ui.removeCallbacks(stateTick);
+        ui.removeCallbacks(logFlush);
+        super.onDestroy();
+    }
+
+    private static String joinLines(List<String> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (String l : lines) sb.append(l).append('\n');
+        return sb.toString();
     }
 
     private void saveCfg() {
@@ -238,7 +315,8 @@ public class MainActivity extends Activity {
         btnToggle.setTextColor(running ? 0xFFE7EAF0 : 0xFFFFFFFF);
         baseUrl.setText(currentBaseUrl());
         HistoryStore s = ApiService.store();
-        poolText.setText("会话池 " + (cfg.poolSize) + (s == null ? "" : ("  ·  记录 " + s.size())));
+        poolText.setText("会话池 " + (cfg.poolSize) + "  ·  v" + appVersion()
+                + (s == null ? "" : ("  ·  记录 " + s.size())));
     }
 
     private void showHistory() {
@@ -276,7 +354,9 @@ public class MainActivity extends Activity {
             String content = "时间：" + e.time + "\n模型：" + e.model + "\n耗时：" + e.ms + "ms"
                     + "\nToken：" + e.promptTokens + "/" + e.completionTokens
                     + (e.flags == null || e.flags.isEmpty() ? "" : ("\n标记：" + e.flags))
-                    + "\n\n—— 提问 ——\n" + e.prompt + "\n\n—— 回答 ——\n" + e.answer;
+                    + "\n\n—— 提问 ——\n" + e.prompt
+                    + (e.think == null || e.think.trim().isEmpty() ? "" : ("\n\n—— 思考链（本地留存） ——\n" + e.think))
+                    + "\n\n—— 回答（撤回前原文） ——\n" + e.answer;
             ScrollView sv = new ScrollView(MainActivity.this);
             TextView tv = new TextView(MainActivity.this);
             tv.setText(content);
@@ -314,6 +394,14 @@ public class MainActivity extends Activity {
                 startActivity(i);
             }
         } catch (Exception ignore) { }
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "1.1.0";
+        }
     }
 
     private boolean canOverlay() {
@@ -363,11 +451,4 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        Log.unsubscribe(logTick);
-        ui.removeCallbacks(logTick);
-        ui.removeCallbacks(stateTick);
-        super.onDestroy();
-    }
 }

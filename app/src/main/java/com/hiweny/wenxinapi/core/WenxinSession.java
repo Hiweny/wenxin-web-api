@@ -69,6 +69,9 @@ public class WenxinSession {
     public long minGapMs = 1200L;
     public int readTimeoutMs = 180000;
     public volatile int totalCalls = 0;
+    /** 预热阶段预先建立到 chat.baidu.com 的 TLS 连接，发问时直接复用（省一次握手） */
+    private java.net.Socket chatSocket;
+    private long chatSocketAt = 0;
 
     public interface Listener {
         void onDelta(String text);
@@ -88,6 +91,7 @@ public class WenxinSession {
         public int completionTokens = 0;
         public int httpStatus = 0;
         public long firstTokenMs = -1;
+        public String withdrawDetail = "";
         public StringBuilder rawHead = new StringBuilder();
         public long totalMs = 0;
 
@@ -161,6 +165,29 @@ public class WenxinSession {
         lid = Json.str(d, "lid");
         baiduid = Json.str(d, "userInfo", "baiduid");
         if (token == null || lid == null) throw new IOException("warm: empty token/lid");
+        preconnect();
+    }
+
+    /**
+     * 预先和 chat.baidu.com 建好 TLS 连接并保持 keep-alive。
+     * 真正发问时直接复用这条连接，省掉 TCP + TLS 握手（手机网络下通常 200~600ms）。
+     * 失败不影响功能：chat() 会自动回退到新建连接。
+     */
+    private void preconnect() {
+        try {
+            Map<String, String> h = new LinkedHashMap<>();
+            h.put("User-Agent", UA_MOBILE);
+            h.put("Accept", "*/*");
+            h.put("Accept-Encoding", "identity");
+            Http1Client.Response r = Http1Client.request("https://chat.baidu.com/robots.txt", "GET", h,
+                    null, 8000, 8000, true, null);
+            try { r.readAll(); } catch (Exception ignore) { }
+            chatSocket = r.detachSocket();
+            chatSocketAt = System.currentTimeMillis();
+            r.close();
+        } catch (Exception ignore) {
+            chatSocket = null;
+        }
     }
 
     private void storeCookies(java.util.List<String> raws) {
@@ -368,8 +395,15 @@ public class WenxinSession {
         if (!cookies.isEmpty()) h.put("Cookie", cookieHeader());
 
         Http1Client.Response resp;
+        java.net.Socket reuse = chatSocket;
+        // 预连接放置超过 25 秒就丢弃（服务器空闲超时关掉后复用会白等一次超时）
+        if (reuse != null && System.currentTimeMillis() - chatSocketAt > 25000) {
+            try { reuse.close(); } catch (Exception ignore) { }
+            reuse = null;
+        }
+        chatSocket = null;   // 一次性使用；SSE 是长连接，结束后不再复用
         try {
-            resp = Http1Client.request(CONV_URL, "POST", h, payload, 15000, readTimeoutMs);
+            resp = Http1Client.request(CONV_URL, "POST", h, payload, 15000, readTimeoutMs, false, reuse);
         } catch (IOException e) {
             r.error = "net: " + e.getMessage();
             r.totalMs = System.currentTimeMillis() - t0;
@@ -469,9 +503,10 @@ public class WenxinSession {
                             if (l != null) l.onDelta(piece);
                         }
                     } else {
-                        // 上游试图缩短/清空已生成内容 → 判定为撤回，保留已输出内容
+                        // 上游试图缩短/清空已生成内容 → 判定为撤回：保留已输出的完整原文（防撤回核心）
                         r.withdrew = true;
-                        if (l != null) l.onWithdraw("shrink");
+                        r.withdrawDetail = "shrink " + cur.length() + "->" + piece.length();
+                        if (l != null) l.onWithdraw(r.withdrawDetail);
                     }
                 } else {
                     r.text.append(piece);
@@ -485,7 +520,9 @@ public class WenxinSession {
             if (!rc.isEmpty() && rc.get(0) instanceof String && !((String) rc.get(0)).isEmpty()) {
                 String tpiece = (String) rc.get(0);
                 String cur = r.think.toString();
-                if (tpiece.length() > cur.length() && tpiece.startsWith(cur)) {
+                if (!cur.isEmpty() && cur.startsWith(tpiece)) {
+                    // 上游重发了已经出现过的片段 → 忽略，避免思考链重复
+                } else if (tpiece.length() > cur.length() && tpiece.startsWith(cur)) {
                     String add = tpiece.substring(cur.length());
                     r.think.setLength(0);
                     r.think.append(tpiece);

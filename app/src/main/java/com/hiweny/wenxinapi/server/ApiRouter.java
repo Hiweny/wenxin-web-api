@@ -1,5 +1,6 @@
 package com.hiweny.wenxinapi.server;
 
+import com.hiweny.wenxinapi.core.ApiActivity;
 import com.hiweny.wenxinapi.core.Config;
 import com.hiweny.wenxinapi.core.HistoryStore;
 import com.hiweny.wenxinapi.core.Json;
@@ -32,6 +33,15 @@ public class ApiRouter implements HttpServer.Handler {
     private volatile String lastRawMessages = "[]";
     private volatile boolean lastTools = false;
     private volatile String lastAt = "";
+    private volatile String lastAnswerHead = "";
+
+    /** 重复回答守卫：记录上一次「问题指纹 -> 回答开头」，用于识别上游把新问题当成旧会话续写 */
+    private String dupPromptKey = "";
+    private String dupAnswerHead = "";
+    private final Object dupLock = new Object();
+    private static final class RetrySignal extends RuntimeException {
+        RetrySignal() { super("retry"); }
+    }
 
     public ApiRouter(Config cfg, SessionPool pool, HistoryStore store, Logger logger, String banner) {
         this.cfg = cfg;
@@ -42,6 +52,22 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     public Config config() { return cfg; }
+
+    /** 把调用阶段广播出去（前台通知 / UI 用） */
+    private void publishState(String phase, String model, int chars, String note) {
+        try {
+            ApiActivity.State st = new ApiActivity.State();
+            st.phase = phase;
+            st.model = model;
+            st.chars = chars;
+            st.note = note == null ? "" : note;
+            st.lastMs = lastCallMs;
+            ApiActivity.publish(st);
+        } catch (Throwable ignore) { }
+    }
+
+    private volatile long lastCallMs = 0;
+
 
     @Override
     public void handle(HttpServer.Request req, HttpServer.Response res) throws Exception {
@@ -69,6 +95,7 @@ public class ApiRouter implements HttpServer.Handler {
             m.put("prompt", lastPrompt);
             m.put("tools", lastTools);
             m.put("raw_messages", lastRawMessages);
+            m.put("answer_head", lastAnswerHead);
             res.json(200, Json.write(m));
             return;
         }
@@ -203,34 +230,89 @@ public class ApiRouter implements HttpServer.Handler {
         lastAt = Tools.nowIso();
         logger.log("[chat] model=" + model + " -> " + internalModel + " stream=" + stream + " think=" + think
                 + " search=" + search + " tools=" + built.toolsEnabled + " msg=" + messages.size()
-                + " prompt=" + built.prompt.length() + "chars");
+                + " prompt=" + built.prompt.length() + "chars «"
+                + Tools.truncate(built.prompt.replace("\n", " "), 40) + "»");
 
-        if (stream) {
-            streamChat(res, built, internalModel, model, completionId, created, search, think);
-        } else {
-            blockChat(res, built, internalModel, model, completionId, created, search, think);
+        publishState(ApiActivity.PHASE_THINKING, model, 0, "");
+        long callStart = System.currentTimeMillis();
+        try {
+            if (stream) {
+                streamChat(res, built, internalModel, model, completionId, created, search, think);
+            } else {
+                blockChat(res, built, internalModel, model, completionId, created, search, think);
+            }
+        } finally {
+            lastCallMs = System.currentTimeMillis() - callStart;
+        }
+    }
+
+    /** 去掉空白取前 n 个字符，用于判定「两个回答是否实质相同」 */
+    private static String headOf(String s, int n) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length() && sb.length() < n; i++) {
+            char c = s.charAt(i);
+            if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private boolean looksDuplicate(String prompt, String answer) {
+        if (answer == null || answer.trim().length() < 24) return false;
+        String hd = headOf(answer, 32);
+        if (hd.length() < 24) return false;
+        synchronized (dupLock) {
+            if (dupAnswerHead.isEmpty()) return false;
+            // 同一个问题重复问、答案一样，属正常
+            if (prompt.equals(dupPromptKey)) return false;
+            return hd.equals(dupAnswerHead);
+        }
+    }
+
+    private void remember(String prompt, String answer) {
+        if (answer == null || answer.trim().length() < 24) return;
+        synchronized (dupLock) {
+            dupPromptKey = prompt;
+            dupAnswerHead = headOf(answer, 32);
+            lastAnswerHead = headOf(answer, 160);
         }
     }
 
     private WenxinSession.Result runOnce(String prompt, String internalModel, boolean search, boolean think,
                                         java.util.List<String> images, WenxinSession.Listener l) throws Exception {
         WenxinSession.Result last = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < 3; attempt++) {
             SessionPool.Lease lease = pool.acquire(30000);
             try {
+                if (attempt > 0 && l instanceof RetryAware) ((RetryAware) l).reset();
                 lease.session.totalCalls++;
                 WenxinSession.Result r = lease.session.chat(prompt, internalModel, search, think, images, l);
                 boolean bad = r.error != null || (r.text.length() == 0 && !r.withdrew);
+                if (!bad && looksDuplicate(prompt, r.textStr())) {
+                    boolean sent = (l instanceof RetryAware) && ((RetryAware) l).hasSent();
+                    if (!sent) {
+                        bad = true;
+                        r.error = "duplicate_answer";
+                        logger.log("[guard] 问题已变化但回答与上一轮完全相同 → 判定上游会话串扰，换新身份重试");
+                    }
+                }
                 if (bad) {
                     lease.session.failCount++;
                     logger.log("[chat] attempt " + (attempt + 1) + " failed: " + r.error);
                     last = r;
-                    if (l instanceof RetryAware && ((RetryAware) l).hasSent()) return r; // 已输出不能重试
-                    try { Thread.sleep(900); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    boolean sent = (l instanceof RetryAware) && ((RetryAware) l).hasSent();
+                    if (sent && !"duplicate_answer".equals(r.error)) return r; // 已经流出去的内容无法重来
+                    try { Thread.sleep(260); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     continue;
                 }
                 lease.session.failCount = 0;
+                remember(prompt, r.textStr());
                 return r;
+            } catch (RetrySignal rs) {
+                logger.log("[guard] 首段内容与上一轮完全相同 → 换新身份重试");
+                last = null;
+                continue;
             } finally {
                 lease.close();
             }
@@ -238,7 +320,7 @@ public class ApiRouter implements HttpServer.Handler {
         return last;
     }
 
-    public interface RetryAware { boolean hasSent(); }
+    public interface RetryAware { boolean hasSent(); void reset(); }
 
     /** 客户端提前断开 */
     static class ClientGone extends RuntimeException {
@@ -277,6 +359,9 @@ public class ApiRouter implements HttpServer.Handler {
                 .append(",\"total_tokens\":").append(r.promptTokens + r.completionTokens).append("}}");
 
         saveHistory(id, model, built.prompt, r);
+        lastCallMs = r.totalMs;
+        publishState(r.error != null ? ApiActivity.PHASE_ERROR : ApiActivity.PHASE_DONE,
+                model, r.text.length(), r.error == null ? "" : Tools.truncate(r.error, 40));
         res.json(200, sb.toString());
     }
 
@@ -290,23 +375,63 @@ public class ApiRouter implements HttpServer.Handler {
         res.chunked = true;
         res.sendHeaders();
 
-        final ToolBridge.StreamGate gate = new ToolBridge.StreamGate();
+        final ToolBridge.StreamGate[] gateRef = {new ToolBridge.StreamGate()};
         final boolean[] sent = {false};
+        final boolean[] started = {false};
+        final StringBuilder pend = new StringBuilder();
+        final StringBuilder pendThink = new StringBuilder();
 
         sendChunk(res, id, model, created, "{\"role\":\"assistant\"}", null, null);
         sent[0] = true;
 
-        WenxinSession.Listener listener = new WenxinSession.Listener() {
+        // 首段缓冲：攒够一小段再决定是否发送，这样「上游串扰（新问题返回旧答案）」可以在
+        // 污染客户端之前被识别并换身份重试，同时不牺牲可感知的首字速度（阈值 60 字，通常 <0.4s）。
+        final Runnable flushPending = new Runnable() {
+            @Override public void run() {
+                if (!started[0]) started[0] = true; else return;
+                publishState(ApiActivity.PHASE_STREAMING, model, pend.length(), "");
+                try {
+                    if (pendThink.length() > 0) {
+                        sendChunk(res, id, model, created, "{\"reasoning_content\":" + quote(pendThink.toString()) + "}", null, null);
+                        pendThink.setLength(0);
+                    }
+                    if (pend.length() > 0) {
+                        String e = gateRef[0].feed(pend.toString());
+                        pend.setLength(0);
+                        if (!e.isEmpty()) sendChunk(res, id, model, created, contentDelta(e), null, null);
+                    }
+                } catch (Exception ex) {
+                    throw new ClientGone();
+                }
+            }
+        };
+
+        final class StreamListener implements WenxinSession.Listener, RetryAware {
             @Override public void onDelta(String text) {
                 try {
-                    String emit = gate.feed(text);
+                    if (!started[0]) {
+                        pend.append(text);
+                        if (pend.length() < 36) return;
+                        if (looksDuplicate(built.prompt, pend.toString())) throw new RetrySignal();
+                        flushPending.run();
+                        return;
+                    }
+                    String emit = gateRef[0].feed(text);
                     if (!emit.isEmpty()) sendChunk(res, id, model, created, contentDelta(emit), null, null);
+                } catch (ClientGone cg) {
+                    throw cg;
+                } catch (RetrySignal rs) {
+                    throw rs;
                 } catch (Exception e) {
                     // 客户端已断开：抛出让上游流尽快结束，避免白烧配额
                     throw new ClientGone();
                 }
             }
             @Override public void onThink(String think) {
+                if (!started[0]) {
+                    if (pendThink.length() < 4000) pendThink.append(think);
+                    return;
+                }
                 try {
                     sendChunk(res, id, model, created, "{\"reasoning_content\":" + quote(think) + "}", null, null);
                 } catch (Exception e) {
@@ -320,7 +445,15 @@ public class ApiRouter implements HttpServer.Handler {
                 } catch (Exception ignore) { }
                 logger.log("[chat] upstream withdraw detected: " + reason);
             }
-        };
+            @Override public boolean hasSent() { return started[0]; }
+            @Override public void reset() {
+                started[0] = false;
+                pend.setLength(0);
+                pendThink.setLength(0);
+                gateRef[0] = new ToolBridge.StreamGate();
+            }
+        }
+        WenxinSession.Listener listener = new StreamListener();
 
         WenxinSession.Result r;
         try {
@@ -343,7 +476,8 @@ public class ApiRouter implements HttpServer.Handler {
             return;
         }
 
-        String tail = gate.finish();
+        flushPending.run();
+        String tail = gateRef[0].finish();
         if (!tail.isEmpty()) sendChunk(res, id, model, created, contentDelta(tail), null, null);
 
         List<ToolBridge.Call> calls = built.toolsEnabled ? ToolBridge.parse(r.textStr()) : new ArrayList<ToolBridge.Call>();
@@ -375,6 +509,9 @@ public class ApiRouter implements HttpServer.Handler {
         res.write("data: [DONE]\n\n");
         res.end();
         saveHistory(id, model, built.prompt, r);
+        lastCallMs = r.totalMs;
+        publishState(r.error != null ? ApiActivity.PHASE_ERROR : ApiActivity.PHASE_DONE,
+                model, r.text.length(), r.error == null ? "" : Tools.truncate(r.error, 40));
     }
 
     private static String quote(String s) {
@@ -402,6 +539,9 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void saveHistory(String id, String model, String prompt, WenxinSession.Result r) {
+        logger.log("[done] " + r.totalMs + "ms · " + r.text.length() + "字 · «"
+                + Tools.truncate(r.textStr().replace("\n", " "), 40) + "»"
+                + (r.withdrew ? " (已拦截撤回并保全原文)" : ""));
         if (!cfg.saveHistory) return;
         HistoryStore.Entry e = new HistoryStore.Entry();
         e.id = id;

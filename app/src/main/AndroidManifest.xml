@@ -12,7 +12,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="文心 Web API"
+        android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"

@@ -11,4 +11,5 @@
     <color name="green">#3DD68C</color>
     <color name="red">#FF6B6B</color>
     <color name="amber">#F2B84B</color>
+    <color name="icon_bg">#26262E</color>
 </resources>
