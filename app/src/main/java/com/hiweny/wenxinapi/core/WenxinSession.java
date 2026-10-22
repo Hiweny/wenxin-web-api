@@ -1,11 +1,7 @@
 package com.hiweny.wenxinapi.core;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -71,6 +67,7 @@ public class WenxinSession {
     public volatile long lastUsed = 0;
     public volatile int failCount = 0;
     public long minGapMs = 1200L;
+    public int readTimeoutMs = 180000;
     public volatile int totalCalls = 0;
 
     public interface Listener {
@@ -106,21 +103,43 @@ public class WenxinSession {
     // 1. 预热：拿到匿名身份（cookie + token + lid）
     // ------------------------------------------------------------------
     public void warm() throws IOException {
-        HttpURLConnection c = (HttpURLConnection) new URL(HOME_URL).openConnection();
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(25000);
-        c.setRequestMethod("GET");
-        c.setInstanceFollowRedirects(true);
-        c.setRequestProperty("User-Agent", UA_MOBILE);
-        c.setRequestProperty("Accept", "text/html,application/xhtml+xml");
-        c.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
-        c.setRequestProperty("Accept-Encoding", "identity");
-        int code = c.getResponseCode();
-        if (code >= 400) throw new IOException("warm http " + code);
-        readCookies(c);
-        String html = readAll(c.getInputStream());
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", UA_MOBILE);
+        h.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        h.put("Accept-Language", "zh-CN,zh;q=0.9");
+        h.put("Accept-Encoding", "identity");
+        h.put("sec-fetch-dest", "document");
+        h.put("sec-fetch-mode", "navigate");
+        h.put("sec-fetch-site", "none");
+        h.put("upgrade-insecure-requests", "1");
+
+        String url = HOME_URL;
+        Http1Client.Response resp = null;
+        for (int i = 0; i < 4; i++) {
+            resp = Http1Client.request(url, "GET", h, null, 15000, 25000);
+            storeCookies(resp.setCookies);
+            if (resp.status >= 300 && resp.status < 400 && resp.header("Location") != null) {
+                String loc = resp.header("Location");
+                resp.close();
+                if (loc.startsWith("http")) {
+                    url = loc;
+                } else {
+                    URL base = new URL(url);
+                    url = base.getProtocol() + "://" + base.getHost() + loc;
+                }
+                continue;
+            }
+            break;
+        }
+        if (resp == null) throw new IOException("warm: no response");
+        if (resp.status >= 400) {
+            resp.close();
+            throw new IOException("warm http " + resp.status);
+        }
+        String html = resp.readAll();
+        resp.close();
         Matcher m = Pattern.compile("name=\"aiTabFrameBaseData\">(.*?)</script>", Pattern.DOTALL).matcher(html);
-        if (!m.find()) throw new IOException("warm: baseData not found");
+        if (!m.find()) throw new IOException("warm: baseData not found (html " + html.length() + "B)");
         Map<String, Object> d = Json.parseObj(m.group(1));
         token = Json.str(d, "token");
         lid = Json.str(d, "lid");
@@ -128,29 +147,23 @@ public class WenxinSession {
         if (token == null || lid == null) throw new IOException("warm: empty token/lid");
     }
 
-    private void readCookies(HttpURLConnection c) {
-        Map<String, List<String>> h = c.getHeaderFields();
-        if (h == null) return;
-        for (Map.Entry<String, List<String>> e : h.entrySet()) {
-            if (e.getKey() == null) continue;
-            if (!"set-cookie".equalsIgnoreCase(e.getKey())) continue;
-            for (String raw : e.getValue()) {
-                if (raw == null) continue;
-                // Android 的 HttpURLConnection 可能把多个 Set-Cookie 合并成一行，这里按 ", name=" 拆开
-                String[] parts = raw.split(",(?=\\s*[A-Za-z0-9_\\-]+=)");
-                for (String part : parts) {
-                    if (part == null) continue;
-                    String one = part.trim();
-                    int eq = one.indexOf('=');
-                    if (eq <= 0) continue;
-                    String name = one.substring(0, eq).trim();
-                    String val = one.substring(eq + 1);
-                    int semi = val.indexOf(';');
-                    if (semi >= 0) val = val.substring(0, semi);
-                    if (name.isEmpty() || val.isEmpty()) continue;
-                    cookies.put(name, val);
-                    if ("BAIDUID".equals(name)) baiduid = val;
-                }
+    private void storeCookies(java.util.List<String> raws) {
+        if (raws == null) return;
+        for (String raw : raws) {
+            if (raw == null) continue;
+            String[] parts = raw.split(",(?=\\s*[A-Za-z0-9_\\-]+=)");
+            for (String part : parts) {
+                if (part == null) continue;
+                String one = part.trim();
+                int eq = one.indexOf('=');
+                if (eq <= 0) continue;
+                String name = one.substring(0, eq).trim();
+                String val = one.substring(eq + 1);
+                int semi = val.indexOf(';');
+                if (semi >= 0) val = val.substring(0, semi);
+                if (name.isEmpty() || val.isEmpty()) continue;
+                cookies.put(name, val);
+                if ("BAIDUID".equals(name)) baiduid = val;
             }
         }
     }
@@ -281,60 +294,53 @@ public class WenxinSession {
         long t0 = System.currentTimeMillis();
         Result r = new Result();
         Map<String, Object> body = buildPayload(query, model, search);
-        String json = Json.write(body);
+        byte[] payload = Json.write(body).getBytes(StandardCharsets.UTF_8);
 
-        HttpURLConnection c = (HttpURLConnection) new URL(CONV_URL).openConnection();
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(180000);
-        c.setRequestMethod("POST");
-        c.setDoOutput(true);
-        c.setRequestProperty("User-Agent", UA_MOBILE);
-        c.setRequestProperty("Accept", "text/event-stream");
-        c.setRequestProperty("Content-Type", "application/json");
-        c.setRequestProperty("Accept-Language", "zh-CN");
-        c.setRequestProperty("Accept-Encoding", "identity");
-        c.setRequestProperty("Origin", "https://chat.baidu.com");
-        c.setRequestProperty("Referer", "https://wenxin.baidu.com/");
-        c.setRequestProperty("source", "wise_csaitab");
-        c.setRequestProperty("isDeepseek", "1");
-        c.setRequestProperty("personifiedswitch", "0");
-        c.setRequestProperty("landingpageswitch", "");
-        c.setRequestProperty("x-chat-message", chatMessageHeader(query, model));
-        if (!cookies.isEmpty()) c.setRequestProperty("Cookie", cookieHeader());
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("User-Agent", UA_MOBILE);
+        h.put("Accept", "text/event-stream");
+        h.put("Content-Type", "application/json");
+        h.put("Accept-Language", "zh-CN,zh;q=0.9");
+        h.put("Accept-Encoding", "identity");
+        h.put("Origin", "https://chat.baidu.com");
+        h.put("Referer", "https://wenxin.baidu.com/");
+        h.put("source", "wise_csaitab");
+        h.put("isDeepseek", "1");
+        h.put("personifiedswitch", "0");
+        h.put("landingpageswitch", "");
+        h.put("sec-fetch-dest", "empty");
+        h.put("sec-fetch-mode", "cors");
+        h.put("sec-fetch-site", "same-origin");
+        h.put("x-chat-message", chatMessageHeader(query, model));
+        if (!cookies.isEmpty()) h.put("Cookie", cookieHeader());
 
-        byte[] payload = json.getBytes(StandardCharsets.UTF_8);
-        c.setFixedLengthStreamingMode(payload.length);
-        try (OutputStream os = c.getOutputStream()) {
-            os.write(payload);
-        }
-        int code = c.getResponseCode();
-        r.httpStatus = code;
-        if (code >= 400) {
-            String err = "";
-            try {
-                InputStream es = c.getErrorStream();
-                if (es != null) err = readAll(es);
-            } catch (Exception ignore) { }
-            r.error = "http " + code + (err.isEmpty() ? "" : (": " + err.substring(0, Math.min(200, err.length()))));
+        Http1Client.Response resp;
+        try {
+            resp = Http1Client.request(CONV_URL, "POST", h, payload, 15000, readTimeoutMs);
+        } catch (IOException e) {
+            r.error = "net: " + e.getMessage();
             r.totalMs = System.currentTimeMillis() - t0;
             return r;
         }
-        readCookies(c);
+        r.httpStatus = resp.status;
+        storeCookies(resp.setCookies);
+        if (resp.status >= 400) {
+            String err = "";
+            try { err = Tools.truncate(resp.readAll(), 200); } catch (Exception ignore) { }
+            resp.close();
+            r.error = "http " + resp.status + (err.isEmpty() ? "" : (": " + err));
+            r.totalMs = System.currentTimeMillis() - t0;
+            return r;
+        }
 
-        StringBuilder seen = new StringBuilder();
-        BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
         String line;
         String ev = null;
         StringBuilder data = new StringBuilder();
         try {
-            while ((line = br.readLine()) != null) {
-                if (r.rawHead.length() < 1200) {
-                    r.rawHead.append(line).append('\n');
-                }
+            while ((line = resp.readLine()) != null) {
+                if (r.rawHead.length() < 1500) r.rawHead.append(line).append('\n');
                 if (line.isEmpty()) {
-                    if (ev != null) {
-                        handleEvent(ev, data.toString(), r, listener, seen, t0);
-                    }
+                    if (ev != null) handleEvent(ev, data.toString(), r, listener, new StringBuilder(), t0);
                     ev = null;
                     data.setLength(0);
                     continue;
@@ -345,9 +351,10 @@ public class WenxinSession {
                     data.append(line.substring(5).trim());
                 }
             }
+        } catch (IOException e) {
+            if (r.error == null && r.text.length() == 0) r.error = "stream: " + e.getMessage();
         } finally {
-            try { br.close(); } catch (Exception ignore) { }
-            c.disconnect();
+            resp.close();
         }
         r.totalMs = System.currentTimeMillis() - t0;
         if (r.text.length() == 0 && r.error == null) {
