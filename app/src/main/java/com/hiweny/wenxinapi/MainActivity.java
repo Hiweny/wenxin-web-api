@@ -43,7 +43,8 @@ public class MainActivity extends Activity {
             "智能模式"
     };
 
-    private TextView dot, statusText, poolText, baseUrl, btnToggle, logView, copyUrl, btnHistory, btnClearLog;
+    private View dot;
+    private TextView statusText, poolText, baseUrl, btnToggle, logView, copyUrl, btnHistory, btnClearLog;
     private EditText apiKey, port;
     private Spinner modelSpinner;
     private CheckBox switchSearch, switchFloat;

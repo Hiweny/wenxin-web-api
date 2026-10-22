@@ -64,6 +64,9 @@ jobs:
             head -c 1200 stream.txt
             echo
             adb exec-out screencap -p > shot_after_chat.png
+            adb logcat -d > full_logcat.txt || true
+            if grep -q "FATAL EXCEPTION" full_logcat.txt; then echo "APP CRASHED"; grep -A20 "FATAL EXCEPTION" full_logcat.txt; exit 1; fi
+            echo "no crash detected"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -73,3 +76,4 @@ jobs:
             services.txt
             logcat.txt
             stream.txt
+            full_logcat.txt

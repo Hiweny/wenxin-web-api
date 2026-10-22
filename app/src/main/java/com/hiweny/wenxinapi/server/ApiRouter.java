@@ -160,6 +160,7 @@ public class ApiRouter implements HttpServer.Handler {
                     logger.log("[chat] attempt " + (attempt + 1) + " failed: " + r.error);
                     last = r;
                     if (l instanceof RetryAware && ((RetryAware) l).hasSent()) return r; // 已输出不能重试
+                    try { Thread.sleep(900); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     continue;
                 }
                 lease.session.failCount = 0;
