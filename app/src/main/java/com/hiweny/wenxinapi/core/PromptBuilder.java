@@ -115,7 +115,7 @@ public final class PromptBuilder {
                 } else if ("assistant".equals(role)) {
                     String tc = toolCallsToText(m.get("tool_calls"));
                     String body = text.isEmpty() ? tc : text;
-                    if (!body.trim().isEmpty()) history.add("助手：" + body);
+                    if (!body.trim().isEmpty()) history.add("助手：" + clipMiddle(body, 1200));
                 } else if ("tool".equals(role) || "function".equals(role)) {
                     history.add("工具结果(" + nvl(Json.str(m, "name")) + ")：" + clipMiddle(text, 1200));
                 } else {
@@ -125,7 +125,7 @@ public final class PromptBuilder {
                         contentToText(m.get("content"), imgs);
                         b.images.addAll(imgs);
                     } else if (!text.trim().isEmpty()) {
-                        history.add("用户：" + text);
+                        history.add("用户：" + clipMiddle(text, 1000));
                     }
                 }
             }
@@ -205,7 +205,9 @@ public final class PromptBuilder {
             p.append("【可用工具】\n").append(toolDefs);
             p.append("需要调用工具时，只输出下面这一行（保留标记，不要代码块、不要解释）：\n");
             p.append(TOOL_OPEN).append("[{\"name\":\"工具名\",\"arguments\":{...}}]").append(TOOL_CLOSE).append("\n\n");
-            p.append("不需要工具就直接正常回答。\n\n");
+            p.append("使用规则：当问题涉及实时或外部数据（天气、时间、新闻、价格、网页内容等），"
+                    + "或需要用户没有提供的信息时，**必须先调用工具**获取，不要凭记忆猜测、也不要直接说做不到。\n");
+            p.append("不需要工具时就直接正常回答。\n\n");
         }
         if (!picked.isEmpty()) {
             p.append("【对话历史】（仅供理解上下文，不要复述）\n");

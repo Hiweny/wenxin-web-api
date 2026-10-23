@@ -127,7 +127,7 @@ def main():
     tools = [{"type": "function", "function": {
         "name": "get_weather", "description": "查询城市天气",
         "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
-    _, calls, _ = chat([{"role": "user", "content": "杭州天气怎么样"}], tools=tools)
+    _, calls, _ = chat([{"role": "user", "content": "杭州天气怎么样？请调用 get_weather 工具查询后再告诉我。"}], tools=tools)
     ok = bool(calls) and calls[0]["function"]["name"] == "get_weather" and "杭州" in calls[0]["function"]["arguments"]
     check("工具调用", ok, calls)
 
