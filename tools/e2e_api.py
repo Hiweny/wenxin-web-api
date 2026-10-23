@@ -144,6 +144,11 @@ def main():
     txt, _, _ = chat([{"role": "user", "content": "今天的日期是几月几日"}], extra={"search": True, "thinking": False})
     check("联网搜索开关", len(txt) > 0, txt[:80])
 
+    # 9) 防撤回：档案接口可用
+    h3 = call("/v1/recall")
+    check("防撤回档案接口", isinstance(h3.get("items"), list),
+          "count=%s" % h3.get("count"))
+
     # 9) 防撤回存档
     h2 = call("/v1/history?limit=3")
     check("防撤回存档", isinstance(h2.get("data"), list) and len(h2["data"]) > 0,

@@ -349,7 +349,9 @@ public class MainActivity extends Activity {
             String head = (e.time == null ? "" : e.time) + "  " + (e.model == null ? "" : e.model);
             String body = e.answer == null ? "" : e.answer.replace("\n", " ");
             if (body.length() > 48) body = body.substring(0, 48) + "…";
-            items[i] = head + "\n" + body + (e.flags != null && !e.flags.isEmpty() ? ("  [" + e.flags.trim() + "]") : "");
+            boolean recalled = e.flags != null && e.flags.contains("withdraw");
+            items[i] = (recalled ? "⚠️ 已撤回  " : "") + head + "\n" + body
+                    + (e.flags != null && !e.flags.isEmpty() ? ("  [" + e.flags.trim() + "]") : "");
         }
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("防撤回记录（本地存档）")
@@ -369,7 +371,9 @@ public class MainActivity extends Activity {
                     + (e.flags == null || e.flags.isEmpty() ? "" : ("\n标记：" + e.flags))
                     + "\n\n—— 提问 ——\n" + e.prompt
                     + (e.think == null || e.think.trim().isEmpty() ? "" : ("\n\n—— 思考链（本地留存） ——\n" + e.think))
-                    + "\n\n—— 回答（撤回前原文） ——\n" + e.answer;
+                    + "\n\n—— 回答（本地保全原文） ——\n" + e.answer
+                    + (e.replaced == null || e.replaced.trim().isEmpty() ? ""
+                        : ("\n\n—— 上游撤回后给出的版本 ——\n" + e.replaced));
             ScrollView sv = new ScrollView(MainActivity.this);
             TextView tv = new TextView(MainActivity.this);
             tv.setText(content);

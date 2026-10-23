@@ -22,6 +22,7 @@ public class HistoryStore {
         public String answer;
         public String think;
         public String flags;
+        public String replaced;
         public long ms;
         public int promptTokens;
         public int completionTokens;
@@ -43,6 +44,8 @@ public class HistoryStore {
             Json.quote(sb, think == null ? "" : think);
             sb.append(",\"flags\":");
             Json.quote(sb, flags == null ? "" : flags);
+            sb.append(",\"replaced\":");
+            Json.quote(sb, replaced == null ? "" : replaced);
             sb.append(",\"ms\":").append(ms);
             sb.append(",\"pt\":").append(promptTokens);
             sb.append(",\"ct\":").append(completionTokens);
@@ -61,6 +64,7 @@ public class HistoryStore {
             e.answer = Json.str(m, "answer");
             e.think = Json.str(m, "think");
             e.flags = Json.str(m, "flags");
+            e.replaced = Json.str(m, "replaced");
             Object ms = m.get("ms");
             e.ms = ms instanceof Number ? ((Number) ms).longValue() : 0;
             Object pt = m.get("pt");
@@ -78,6 +82,42 @@ public class HistoryStore {
     public HistoryStore(File dir, int cap) {
         this.cap = cap;
         this.file = dir == null ? null : new File(dir, "history.jsonl");
+        if (file != null && file.getParentFile() != null && !file.getParentFile().exists()) {
+            file.getParentFile().mkdirs();
+        }
+        load();
+    }
+
+    /** 启动时把上次的存档读回来（否则重启后"防撤回记录"就是空的，等于没做） */
+    private void load() {
+        if (file == null || !file.isFile()) return;
+        String tail = null;
+        try {
+            long len = file.length();
+            long start = Math.max(0, len - 2 * 1024 * 1024);   // 只读尾部 2MB，避免大文件拖慢启动
+            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+                raf.seek(start);
+                byte[] buf = new byte[(int) (len - start)];
+                raf.readFully(buf);
+                tail = new String(buf, StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            return;
+        }
+        if (tail == null || tail.isEmpty()) return;
+        String[] lines = tail.split("\n");
+        java.util.LinkedList<Entry> loaded = new java.util.LinkedList<>();
+        for (String line : lines) {
+            String t = line.trim();
+            if (t.isEmpty() || !t.startsWith("{")) continue;
+            try {
+                Entry e = Entry.fromJson(t);
+                if (e != null && e.answer != null) loaded.addLast(e);
+            } catch (Exception ignore) { }
+        }
+        while (loaded.size() > cap) loaded.removeFirst();
+        // entries 按"最新在前"
+        for (java.util.Iterator<Entry> it = loaded.descendingIterator(); it.hasNext(); ) entries.addLast(it.next());
     }
 
     public synchronized void add(Entry e) {

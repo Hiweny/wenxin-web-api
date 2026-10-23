@@ -115,6 +115,10 @@ public final class PromptBuilder {
                 } else if ("assistant".equals(role)) {
                     String tc = toolCallsToText(m.get("tool_calls"));
                     String body = text.isEmpty() ? tc : text;
+                    // 防撤回回填：客户端可能持有"撤回后"的版本（错误提示/被截短），用本地存档还原原文，
+                    // 否则下一轮模型看到的就是被删改过的上下文，表现成"忘事/答非所问"。
+                    String recovered = AntiRecall.recover(body);
+                    if (recovered != null) body = recovered;
                     if (!body.trim().isEmpty()) history.add("助手：" + clipMiddle(body, 1200));
                 } else if ("tool".equals(role) || "function".equals(role)) {
                     history.add("工具结果(" + nvl(Json.str(m, "name")) + ")：" + clipMiddle(text, 1200));

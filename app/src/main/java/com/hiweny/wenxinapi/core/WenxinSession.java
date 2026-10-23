@@ -98,6 +98,8 @@ public class WenxinSession {
         public int httpStatus = 0;
         public long firstTokenMs = -1;
         public String withdrawDetail = "";
+        /** 上游撤回时给出的"替代版本"（错误提示 / 被删改后的内容），仅用于留证 */
+        public String replaced = "";
         public StringBuilder rawHead = new StringBuilder();
         public long totalMs = 0;
 
@@ -485,6 +487,64 @@ public class WenxinSession {
                 + ",enter_type:chat_url,re_rank:1,modelName:" + model + ",sa:bkb";
     }
 
+    /**
+     * 文本累积核心（防撤回）。
+     *
+     * 上游在不同阶段会发两种形态：增量（append）与全量重绘（replace）。全量重绘里既可能是
+     * "内容继续变长"（正常），也可能是"内容被换掉"（撤回 / 内容过滤）。规则：
+     *   1. 变长且以原文为前缀 → 只发增量；
+     *   2. 变短 → 判定撤回，**保留原文**，后续不再覆盖；
+     *   3. 分叉但命中撤回/错误文案 → 判定撤回，保留原文；
+     *   4. 分叉且更长、也不是错误文案 → 采用新版本，旧版本存进 replaced 备查。
+     */
+    private void applyPiece(Result r, String piece, String showType, Listener l) {
+        String cur = r.text.toString();
+        boolean replace = "replace".equals(showType);
+
+        if (!replace) {
+            // 增量流里混进"撤回提示"：不要让它污染正文
+            if (cur.length() > 60 && AntiRecall.looksRecalled(piece)) {
+                markRecall(r, piece, "append-hint " + piece.length(), l);
+                return;
+            }
+            r.text.append(piece);
+            if (l != null) l.onDelta(piece);
+            return;
+        }
+
+        if (piece.equals(cur)) return;
+        if (piece.startsWith(cur)) {
+            String add = piece.substring(cur.length());
+            r.text.append(add);
+            if (l != null) l.onDelta(add);
+            return;
+        }
+        if (cur.startsWith(piece)) {
+            markRecall(r, piece, "shrink " + cur.length() + "->" + piece.length(), l);
+            return;
+        }
+        if (AntiRecall.looksRecalled(piece)) {
+            markRecall(r, piece, "blocked " + cur.length() + "->" + piece.length(), l);
+            return;
+        }
+        if (piece.length() > cur.length()) {
+            if (r.replaced.isEmpty()) r.replaced = cur;
+            r.text.setLength(0);
+            r.text.append(piece);
+            if (l != null) l.onDelta(piece);
+        } else {
+            markRecall(r, piece, "rewrite " + cur.length() + "->" + piece.length(), l);
+        }
+    }
+
+    private void markRecall(Result r, String piece, String detail, Listener l) {
+        boolean first = !r.withdrew;
+        r.withdrew = true;
+        r.withdrawDetail = detail;
+        if (piece != null && !piece.isEmpty() && piece.length() < r.text.length()) r.replaced = piece;
+        if (first && l != null) l.onWithdraw(detail);
+    }
+
     @SuppressWarnings("unchecked")
     private void handleEvent(String ev, String data, Result r, Listener l, StringBuilder seen, long t0) {
         if (data.isEmpty()) return;
@@ -511,30 +571,7 @@ public class WenxinSession {
             boolean isTextComp = (comp != null && comp.startsWith("markdown"))
                     || (Json.str(g, "text") != null && !Json.str(g, "text").isEmpty());
             if (piece != null && !piece.isEmpty() && isTextComp) {
-                String showType = Json.str(g, "showType");
-                if ("replace".equals(showType)) {
-                    String cur = r.text.toString();
-                    if (piece.length() >= cur.length()) {
-                        // 正常的重绘（更完整）→ 用差量继续追加
-                        if (piece.startsWith(cur)) {
-                            String add = piece.substring(cur.length());
-                            r.text.append(add);
-                            if (l != null) l.onDelta(add);
-                        } else {
-                            r.text.setLength(0);
-                            r.text.append(piece);
-                            if (l != null) l.onDelta(piece);
-                        }
-                    } else {
-                        // 上游试图缩短/清空已生成内容 → 判定为撤回：保留已输出的完整原文（防撤回核心）
-                        r.withdrew = true;
-                        r.withdrawDetail = "shrink " + cur.length() + "->" + piece.length();
-                        if (l != null) l.onWithdraw(r.withdrawDetail);
-                    }
-                } else {
-                    r.text.append(piece);
-                    if (l != null) l.onDelta(piece);
-                }
+                applyPiece(r, piece, Json.str(g, "showType"), l);
                 if (r.firstTokenMs < 0) r.firstTokenMs = System.currentTimeMillis() - t0;
                 if (Boolean.TRUE.equals(g.get("isFinished")) && r.error == null) { /* keep */ }
             }

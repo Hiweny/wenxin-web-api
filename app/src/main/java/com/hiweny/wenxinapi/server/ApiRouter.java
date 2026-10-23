@@ -1,6 +1,7 @@
 package com.hiweny.wenxinapi.server;
 
 import com.hiweny.wenxinapi.core.ApiActivity;
+import com.hiweny.wenxinapi.core.AntiRecall;
 import com.hiweny.wenxinapi.core.Config;
 import com.hiweny.wenxinapi.core.HistoryStore;
 import com.hiweny.wenxinapi.core.ImageFetcher;
@@ -51,6 +52,27 @@ public class ApiRouter implements HttpServer.Handler {
         this.store = store;
         this.logger = logger;
         this.banner = banner;
+        restoreRecall();
+    }
+
+    /** 启动时用历史存档重建防撤回档案（进程重启后仍然能回填原文） */
+    private void restoreRecall() {
+        try {
+            int n = 0;
+            for (HistoryStore.Entry e : store.list(200)) {
+                if (e.flags == null || !e.flags.contains("withdraw")) continue;
+                AntiRecall.Record rec = new AntiRecall.Record();
+                rec.id = e.id;
+                rec.text = e.answer == null ? "" : e.answer;
+                rec.replaced = e.replaced == null ? "" : e.replaced;
+                rec.recalled = true;
+                rec.detail = e.flags;
+                rec.at = System.currentTimeMillis();
+                AntiRecall.remember(rec);
+                n++;
+            }
+            if (n > 0) logger.log("[recall] 已从存档恢复 " + n + " 条防撤回记录");
+        } catch (Throwable ignore) { }
     }
 
     public Config config() { return cfg; }
@@ -98,6 +120,15 @@ public class ApiRouter implements HttpServer.Handler {
             m.put("tools", lastTools);
             m.put("raw_messages", lastRawMessages);
             m.put("answer_head", lastAnswerHead);
+            res.json(200, Json.write(m));
+            return;
+        }
+        if ("/v1/recall".equals(p) || "/recall".equals(p)) {
+            java.util.List<Object> arr = new ArrayList<>();
+            for (AntiRecall.Record rec : AntiRecall.recalled()) arr.add(AntiRecall.toJson(rec));
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("count", arr.size());
+            m.put("items", arr);
             res.json(200, Json.write(m));
             return;
         }
@@ -206,6 +237,11 @@ public class ApiRouter implements HttpServer.Handler {
         boolean think = cfg.thinkDefault;
         if (body.get("thinking") instanceof Boolean) think = (Boolean) body.get("thinking");
         if (extra.get("thinking") instanceof Boolean) think = (Boolean) extra.get("thinking");
+        // 撤回提示条（默认关闭，开启后会在被撤回的回答末尾追加一行提示）
+        boolean recallTip = false;
+        if (body.get("recall_tip") instanceof Boolean) recallTip = (Boolean) body.get("recall_tip");
+        if (extra.get("recall_tip") instanceof Boolean) recallTip = (Boolean) extra.get("recall_tip");
+
         Object effort = body.containsKey("reasoning_effort") ? body.get("reasoning_effort") : extra.get("reasoning_effort");
         if (effort instanceof String) {
             String e = ((String) effort).toLowerCase(Locale.ROOT);
@@ -260,9 +296,9 @@ public class ApiRouter implements HttpServer.Handler {
         long callStart = System.currentTimeMillis();
         try {
             if (stream) {
-                streamChat(res, built, internalModel, model, completionId, created, search, think);
+                streamChat(res, built, internalModel, model, completionId, created, search, think, recallTip);
             } else {
-                blockChat(res, built, internalModel, model, completionId, created, search, think);
+                blockChat(res, built, internalModel, model, completionId, created, search, think, recallTip);
             }
         } finally {
             lastCallMs = System.currentTimeMillis() - callStart;
@@ -351,12 +387,14 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void blockChat(HttpServer.Response res, PromptBuilder.Built built, String internalModel,
-                           String model, String id, long created, boolean search, boolean think) throws Exception {
+                           String model, String id, long created, boolean search, boolean think,
+                           boolean recallTip) throws Exception {
         WenxinSession.Result r = runOnce(built.prompt, internalModel, search, think, built.images, null);
         if (r == null) { res.json(502, "{\"error\":{\"message\":\"upstream unavailable\"}}"); return; }
 
         List<ToolBridge.Call> calls = built.toolsEnabled ? ToolBridge.parse(r.textStr()) : new ArrayList<ToolBridge.Call>();
         String text = built.toolsEnabled ? ToolBridge.stripMarkup(r.textStr()) : r.textStr();
+        if (recallTip && r.withdrew) text = text + "\n\n" + AntiRecall.TIP;
 
         StringBuilder sb = new StringBuilder();
         sb.append("{\"id\":");
@@ -377,6 +415,7 @@ public class ApiRouter implements HttpServer.Handler {
             Json.quote(sb, r.thinkStr());
         }
         sb.append("},\"finish_reason\":").append(calls.isEmpty() ? "\"stop\"" : "\"tool_calls\"").append("}],");
+        if (r.withdrew) sb.append(",\"withdrawn\":true");
         sb.append("\"usage\":{\"prompt_tokens\":").append(r.promptTokens)
                 .append(",\"completion_tokens\":").append(r.completionTokens)
                 .append(",\"total_tokens\":").append(r.promptTokens + r.completionTokens).append("}}");
@@ -389,7 +428,8 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void streamChat(HttpServer.Response res, PromptBuilder.Built built, String internalModel,
-                            String model, String id, long created, boolean search, boolean think) throws Exception {
+                            String model, String id, long created, boolean search, boolean think,
+                            boolean recallTip) throws Exception {
         res.status = 200;
         res.headers.put("Content-Type", "text/event-stream; charset=utf-8");
         res.headers.put("Cache-Control", "no-store");
@@ -523,6 +563,9 @@ public class ApiRouter implements HttpServer.Handler {
             sendChunk(res, id, model, created, d.toString(), null, null);
             finish = "tool_calls";
         }
+        if (recallTip && r.withdrew) {
+            sendChunk(res, id, model, created, contentDelta("\n\n" + AntiRecall.TIP), null, null);
+        }
         sendChunk(res, id, model, created, "{}", finish,
                 "{\"prompt_tokens\":" + r.promptTokens + ",\"completion_tokens\":" + r.completionTokens
                         + ",\"total_tokens\":" + (r.promptTokens + r.completionTokens) + "}");
@@ -559,6 +602,23 @@ public class ApiRouter implements HttpServer.Handler {
     }
 
     private void saveHistory(String id, String model, String prompt, WenxinSession.Result r) {
+        // 防撤回：把每一轮回答（含被撤回的原文）记进本地档案，供客户端回填与 App 内查看
+        try {
+            AntiRecall.Record rec = new AntiRecall.Record();
+            rec.id = id;
+            rec.prompt = Tools.truncate(prompt, 800);
+            rec.text = r.textStr();
+            rec.replaced = r.replaced;
+            rec.recalled = r.withdrew;
+            rec.at = System.currentTimeMillis();
+            rec.detail = r.withdrawDetail;
+            AntiRecall.remember(rec);
+            if (r.withdrew) {
+                logger.log("[recall] 已拦截撤回：原文 " + r.text.length() + " 字 / 撤回版 "
+                        + (r.replaced == null ? 0 : r.replaced.length()) + " 字（" + r.withdrawDetail + "）");
+            }
+        } catch (Throwable ignore) { }
+
         logger.log("[done] " + r.totalMs + "ms · " + r.text.length() + "字 · «"
                 + Tools.truncate(r.textStr().replace("\n", " "), 40) + "»"
                 + (r.withdrew ? " (已拦截撤回并保全原文)" : ""));
@@ -570,6 +630,7 @@ public class ApiRouter implements HttpServer.Handler {
         e.prompt = Tools.truncate(prompt, 4000);
         e.answer = r.textStr();
         e.think = Tools.truncate(r.thinkStr(), 8000);
+        e.replaced = r.replaced;
         e.flags = (r.error != null ? ("error:" + r.error) : "")
                 + (r.withdrew ? " withdraw" : "")
                 + (r.finished ? "" : " unfinished");
