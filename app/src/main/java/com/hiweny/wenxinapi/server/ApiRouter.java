@@ -3,6 +3,7 @@ package com.hiweny.wenxinapi.server;
 import com.hiweny.wenxinapi.core.ApiActivity;
 import com.hiweny.wenxinapi.core.Config;
 import com.hiweny.wenxinapi.core.HistoryStore;
+import com.hiweny.wenxinapi.core.ImageFetcher;
 import com.hiweny.wenxinapi.core.Json;
 import com.hiweny.wenxinapi.core.PromptBuilder;
 import com.hiweny.wenxinapi.core.SessionPool;
@@ -34,6 +35,7 @@ public class ApiRouter implements HttpServer.Handler {
     private volatile boolean lastTools = false;
     private volatile String lastAt = "";
     private volatile String lastAnswerHead = "";
+    private volatile String lastMessagesHash = "";
 
     /** 重复回答守卫：记录上一次「问题指纹 -> 回答开头」，用于识别上游把新问题当成旧会话续写 */
     private String dupPromptKey = "";
@@ -210,7 +212,17 @@ public class ApiRouter implements HttpServer.Handler {
             if (e.equals("none") || e.equals("off") || e.equals("minimal")) think = false;
         }
 
-        PromptBuilder.Built built = PromptBuilder.build(messages, tools);
+        int budget = cfg.contextChars;
+        if (body.get("context_chars") instanceof Number) budget = ((Number) body.get("context_chars")).intValue();
+        if (extra.get("context_chars") instanceof Number) budget = ((Number) extra.get("context_chars")).intValue();
+        // 客户端自检：如果两次请求的 messages 一模一样，说明前端没有把新消息发出来（或本地重试）
+        String mh = Integer.toHexString(Json.write(messages).hashCode()) + ":" + messages.size();
+        if (mh.equals(lastMessagesHash)) {
+            logger.log("[warn] 本次 messages 与上一次完全相同 —— 若你在问新问题，说明前端没把新消息发出来");
+        }
+        lastMessagesHash = mh;
+
+        PromptBuilder.Built built = PromptBuilder.build(messages, tools, budget);
         if (built.prompt == null || built.prompt.trim().isEmpty()) {
             res.json(400, "{\"error\":{\"message\":\"empty prompt: messages 中没有可用的 user 内容\",\"type\":\"invalid_request_error\"}}");
             return;
@@ -220,9 +232,18 @@ public class ApiRouter implements HttpServer.Handler {
         long created = System.currentTimeMillis() / 1000;
 
         if (!built.images.isEmpty()) {
-            StringBuilder ib = new StringBuilder();
-            for (String u : built.images) ib.append(u.startsWith("data:") ? ("data:…(len=" + u.length() + ")") : u).append(' ');
-            logger.log("[chat] images=" + built.images.size() + " [" + Tools.truncate(ib.toString(), 120) + "]");
+            // 外部 http(s) 图片先下载内联为 data:URL：上游抓外链经常失败，内联最稳
+            java.util.List<String> inlined = new ArrayList<>();
+            int failed = 0;
+            for (String u : built.images) {
+                if (inlined.size() >= 4) break;
+                String d = ImageFetcher.toDataUrl(u);
+                if (d != null) inlined.add(d); else failed++;
+            }
+            if (failed > 0) logger.log("[chat] images: " + failed + " 张下载失败（可能是防盗链或超过 2MB），已跳过");
+            logger.log("[chat] images=" + inlined.size() + " 张（已内联，总长 "
+                    + (inlined.isEmpty() ? 0 : inlined.get(0).length()) + "B）");
+            built.images = inlined;
         }
         lastPrompt = Tools.truncate(built.prompt.replace("\n", " ⏎ "), 300);
         lastRawMessages = Json.write(messages);
@@ -231,7 +252,9 @@ public class ApiRouter implements HttpServer.Handler {
         logger.log("[chat] model=" + model + " -> " + internalModel + " stream=" + stream + " think=" + think
                 + " search=" + search + " tools=" + built.toolsEnabled + " msg=" + messages.size()
                 + " prompt=" + built.prompt.length() + "chars «"
-                + Tools.truncate(built.prompt.replace("\n", " "), 40) + "»");
+                + Tools.truncate(built.prompt.replace("\n", " "), 40) + "»"
+                + (built.droppedTurns > 0 ? (" [省略历史" + built.droppedTurns + "条]") : "")
+                + (built.clipped ? " [当前问题已截断]" : ""));
 
         publishState(ApiActivity.PHASE_THINKING, model, 0, "");
         long callStart = System.currentTimeMillis();

@@ -10,4 +10,6 @@ public class Config {
     public boolean thinkDefault = true;
     public boolean saveHistory = true;
     public boolean allowNoKey = false;
+    /** 折叠后 prompt 的字符预算（文心单轮接口，太长会答非所问甚至被拒） */
+    public int contextChars = 7000;
 }

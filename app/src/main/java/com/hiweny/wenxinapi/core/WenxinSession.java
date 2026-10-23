@@ -37,23 +37,29 @@ public class WenxinSession {
     public static final String HOME_URL = "https://wenxin.baidu.com/";
 
     /** 对外模型名 -> 文心内部 modelName */
+    /**
+     * 对外模型名 -> 文心上游 modelName。
+     *
+     * 实测（2026-10）只有这几个值会被上游真正接受，其它任何值都会被**静默回退成 smartMode**
+     * （文心助手，质量明显更差）：
+     *   DeepSeek-V4 -> DEEPSEEK_V4 ；DeepSeek-V4-Flash -> DEEPSEEK_V4_FLASH ；ERINE-5.1 ；smartMode
+     * 例如 "DeepSeek-R1"、"DeepSeek-V4-Pro" 都是无效值 —— 所以这里把它们统一收敛到 V4，
+     * 而不是把无效值透传上去（那会让用户以为在用 R1，实际是文心助手）。
+     */
     public static String mapModel(String apiModel) {
         if (apiModel == null) return "DeepSeek-V4";
         String m = apiModel.toLowerCase(Locale.ROOT);
         if (m.contains("flash")) return "DeepSeek-V4-Flash";
-        if (m.contains("v4") && m.contains("pro")) return "DeepSeek-V4";
-        if (m.contains("v4")) return "DeepSeek-V4";
-        if (m.contains("r1") || m.contains("reason") || m.contains("think")) return "DeepSeek-R1";
         if (m.contains("ernie") || m.contains("wenxin")) return "ERINE-5.1";
         if (m.contains("smart") || m.contains("auto")) return "smartMode";
+        // v4 / pro / r1 / reason / think / 其它 → 统一走最强可用的 DeepSeek-V4
         return "DeepSeek-V4";
     }
 
     public static List<String> publicModels() {
         List<String> l = new ArrayList<>();
-        l.add("deepseek-v4-pro");
+        l.add("deepseek-v4");
         l.add("deepseek-v4-flash");
-        l.add("deepseek-r1");
         l.add("ernie-5.1");
         l.add("smartmode");
         return l;
@@ -451,7 +457,20 @@ public class WenxinSession {
         if (r.text.length() == 0 && r.error == null) {
             r.error = r.withdrew ? "withdrawn" : "empty_response";
         }
+        // 上游的"软拒绝"：HTTP 200 + 一句固定文案，通常由内容风控或请求异常触发。
+        // 标成错误让上层换新身份重试，而不是把它当正常回答交给客户端。
+        if (r.error == null && isSoftRefusal(r.textStr())) {
+            r.error = "upstream_blocked";
+        }
         return r;
+    }
+
+    /** 上游统一错误文案 */
+    public static boolean isSoftRefusal(String text) {
+        if (text == null) return false;
+        if (text.length() > 120) return false;
+        return text.contains("出了点小问题") || text.contains("请稍后重试")
+                || text.contains("换个问题试试") || text.contains("服务繁忙");
     }
 
     private String chatMessageHeader(String query, String model) {

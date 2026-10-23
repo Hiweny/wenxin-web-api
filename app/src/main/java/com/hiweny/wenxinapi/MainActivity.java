@@ -34,11 +34,10 @@ import java.util.List;
 
 public class MainActivity extends Activity {
 
-    private static final String[] MODELS = {"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-r1", "ernie-5.1", "smartmode"};
+    private static final String[] MODELS = {"deepseek-v4", "deepseek-v4-flash", "ernie-5.1", "smartmode"};
     private static final String[] MODEL_LABELS = {
-            "V4 Pro",
-            "V4 Flash",
-            "R1 深思",
+            "V4（强）",
+            "V4 Flash（快）",
             "文心 5.1",
             "智能模式"
     };
